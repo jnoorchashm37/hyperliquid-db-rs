@@ -1,12 +1,12 @@
+// #![cfg(target_os = "linux")]
+
 mod current_impl;
 mod existing_fs_reader;
+
 use std::{
-    env,
-    fs::OpenOptions,
-    io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     process,
-    sync::mpsc,
+    sync::{Arc, Barrier, mpsc},
     thread,
     time::{Duration, Instant}
 };
@@ -14,6 +14,11 @@ use std::{
 use hyperliquid_db::fs_watchers::{directory::OutData, types::HyperliquidDataDirKind};
 
 const BENCHMARK_DIRECTORY: &str = "/var/lib/hyperliquid/hl/data/replica_cmds";
+const BENCHMARK_RUNS: usize = 10;
+const BENCHMARK_CHUNKS: usize = 1_000;
+const BENCHMARK_CHUNK_BYTES: usize = 1_024;
+const BENCHMARK_READY_MS: u64 = 100;
+const BENCHMARK_RECV_TIMEOUT_MS: u64 = 10_000;
 
 type SpawnReader = fn(HyperliquidDataDirKind, &Path) -> eyre::Result<mpsc::Receiver<OutData>>;
 
@@ -25,22 +30,37 @@ pub fn run_fs_readers_bench() {
 }
 
 fn run() -> eyre::Result<()> {
-    let config = BenchConfig::from_env()?;
+    let config = BenchConfig::default();
+    let directory = Path::new(BENCHMARK_DIRECTORY);
+    if !directory.is_dir() {
+        return Err(eyre::eyre!(
+            "BENCHMARK_DIRECTORY does not exist or is not a directory: {}",
+            directory.display()
+        ));
+    }
 
     println!("fs_watching benchmark");
+    println!("directory: {}", directory.display());
     println!("runs: {}", config.runs);
-    println!("chunks/run: {}", config.chunks);
-    println!("chunk bytes: {}", config.chunk_bytes);
-    println!("bytes/run: {}", config.bytes_per_run());
+    println!("target chunks/run: {}", config.chunks);
+    println!("target chunk bytes: {}", config.chunk_bytes);
+    println!("target bytes/run: {}", config.bytes_per_run());
     println!("ready delay: {:.3} ms", ms(config.ready_delay));
     println!("recv timeout/run: {:.3} ms", ms(config.recv_timeout));
     println!();
 
-    let current = benchmark_reader("current_impl", current_impl::spawn_file_reader, &config)?;
-    let existing =
-        benchmark_reader("existing_fs_reader", existing_fs_reader::spawn_file_reader, &config)?;
+    let collectors = vec![
+        spawn_reader_collector("current_impl", current_impl::spawn_file_reader, directory)?,
+        spawn_reader_collector(
+            "existing_fs_reader",
+            existing_fs_reader::spawn_file_reader,
+            directory
+        )?,
+    ];
+    thread::sleep(config.ready_delay);
 
-    print_report(&[current, existing]);
+    let reports = benchmark_collectors(collectors, &config)?;
+    print_report(&reports);
 
     Ok(())
 }
@@ -55,111 +75,136 @@ struct BenchConfig {
 }
 
 impl BenchConfig {
-    fn from_env() -> eyre::Result<Self> {
-        let runs = env_usize("FS_WATCH_BENCH_RUNS", 10)?;
-        let chunks = env_usize("FS_WATCH_BENCH_CHUNKS", 1_000)?;
-        let chunk_bytes = env_usize("FS_WATCH_BENCH_CHUNK_BYTES", 1_024)?;
-        let ready_delay = Duration::from_millis(env_u64("FS_WATCH_BENCH_READY_MS", 100)?);
-        let recv_timeout =
-            Duration::from_millis(env_u64("FS_WATCH_BENCH_RECV_TIMEOUT_MS", 10_000)?);
-
-        if runs == 0 {
-            return Err(eyre::eyre!("FS_WATCH_BENCH_RUNS must be greater than 0"));
-        }
-        if chunks == 0 {
-            return Err(eyre::eyre!("FS_WATCH_BENCH_CHUNKS must be greater than 0"));
-        }
-        if chunk_bytes == 0 {
-            return Err(eyre::eyre!("FS_WATCH_BENCH_CHUNK_BYTES must be greater than 0"));
-        }
-
-        Ok(Self { runs, chunks, chunk_bytes, ready_delay, recv_timeout })
-    }
-
     fn bytes_per_run(self) -> usize {
         self.chunks * self.chunk_bytes
     }
 }
 
-struct ReaderReport {
-    name:          String,
-    bytes_per_run: usize,
-    samples:       Vec<Sample>
+impl Default for BenchConfig {
+    fn default() -> Self {
+        let runs = BENCHMARK_RUNS;
+        let chunks = BENCHMARK_CHUNKS;
+        let chunk_bytes = BENCHMARK_CHUNK_BYTES;
+        let ready_delay = Duration::from_millis(BENCHMARK_READY_MS);
+        let recv_timeout = Duration::from_millis(BENCHMARK_RECV_TIMEOUT_MS);
+        Self { runs, chunks, chunk_bytes, ready_delay, recv_timeout }
+    }
 }
 
+struct ReaderCollector {
+    name:       &'static str,
+    command_tx: mpsc::Sender<CollectorCommand>,
+    result_rx:  mpsc::Receiver<Result<Sample, String>>
+}
+
+enum CollectorCommand {
+    Sample { target_bytes: usize, timeout: Duration, barrier: Arc<Barrier> },
+    Stop
+}
+
+struct ReaderReport {
+    name:                 &'static str,
+    target_bytes_per_run: usize,
+    samples:              Vec<Sample>
+}
+
+#[derive(Clone, Copy)]
 struct Sample {
     total:    Duration,
-    write:    Duration,
+    bytes:    usize,
     messages: usize
 }
 
-fn benchmark_reader(
-    name: &str,
+fn spawn_reader_collector(
+    name: &'static str,
     spawn_reader: SpawnReader,
-    config: &BenchConfig
-) -> eyre::Result<ReaderReport> {
-    let temp_dir = tempfile::Builder::new().prefix(name).tempdir()?;
-    let rx = spawn_reader(HyperliquidDataDirKind::ReplicaCmds, temp_dir.path())?;
-    thread::sleep(config.ready_delay);
+    directory: &Path
+) -> eyre::Result<ReaderCollector> {
+    let rx = spawn_reader(HyperliquidDataDirKind::ReplicaCmds, directory)?;
+    let (command_tx, command_rx) = mpsc::channel();
+    let (result_tx, result_rx) = mpsc::channel();
 
-    let mut samples = Vec::with_capacity(config.runs);
+    thread::spawn(move || {
+        while let Ok(command) = command_rx.recv() {
+            match command {
+                CollectorCommand::Sample { target_bytes, timeout, barrier } => {
+                    drain_stale_messages(&rx);
+                    barrier.wait();
+
+                    let result = recv_target_bytes(&rx, target_bytes, timeout)
+                        .map_err(|err| format!("{err:?}"));
+                    if result_tx.send(result).is_err() {
+                        break;
+                    }
+                }
+                CollectorCommand::Stop => break
+            }
+        }
+    });
+
+    Ok(ReaderCollector { name, command_tx, result_rx })
+}
+
+fn benchmark_collectors(
+    collectors: Vec<ReaderCollector>,
+    config: &BenchConfig
+) -> eyre::Result<Vec<ReaderReport>> {
+    let mut reports: Vec<ReaderReport> = collectors
+        .iter()
+        .map(|collector| ReaderReport {
+            name:                 collector.name,
+            target_bytes_per_run: config.bytes_per_run(),
+            samples:              Vec::with_capacity(config.runs)
+        })
+        .collect();
+
     for run_idx in 0..config.runs {
-        drain_stale_messages(&rx);
+        let barrier = Arc::new(Barrier::new(collectors.len() + 1));
+        for collector in &collectors {
+            collector
+                .command_tx
+                .send(CollectorCommand::Sample {
+                    target_bytes: config.bytes_per_run(),
+                    timeout:      config.recv_timeout,
+                    barrier:      barrier.clone()
+                })
+                .map_err(|_| eyre::eyre!("{} collector stopped", collector.name))?;
+        }
 
-        let path = temp_dir.path().join(format!("sample-{run_idx:04}.log"));
-        let started = Instant::now();
-        let write = write_sample_file(&path, run_idx, config)?;
-        let messages = recv_expected_bytes(&rx, config.bytes_per_run(), config.recv_timeout)
-            .map_err(|err| eyre::eyre!("{name} run {run_idx} failed: {err}"))?;
-        let total = started.elapsed();
+        barrier.wait();
 
-        samples.push(Sample { total, write, messages });
+        for (collector, report) in collectors.iter().zip(reports.iter_mut()) {
+            let sample = collector
+                .result_rx
+                .recv()
+                .map_err(|_| eyre::eyre!("{} collector did not return a sample", collector.name))?
+                .map_err(|err| eyre::eyre!("{} run {run_idx} failed: {err}", collector.name))?;
+            report.samples.push(sample);
+        }
     }
 
-    Ok(ReaderReport { name: name.to_owned(), bytes_per_run: config.bytes_per_run(), samples })
-}
-
-fn write_sample_file(
-    path: &PathBuf,
-    run_idx: usize,
-    config: &BenchConfig
-) -> eyre::Result<Duration> {
-    let mut file = OpenOptions::new().create_new(true).write(true).open(path)?;
-    let started = Instant::now();
-
-    for chunk_idx in 0..config.chunks {
-        let chunk = make_chunk(run_idx, chunk_idx, config.chunk_bytes);
-        file.write_all(&chunk)?;
-        file.flush()?;
+    for collector in &collectors {
+        let _ = collector.command_tx.send(CollectorCommand::Stop);
     }
 
-    Ok(started.elapsed())
+    Ok(reports)
 }
 
-fn make_chunk(run_idx: usize, chunk_idx: usize, chunk_bytes: usize) -> Vec<u8> {
-    let mut chunk = vec![b'x'; chunk_bytes];
-    let prefix = format!("{run_idx:08}:{chunk_idx:08}:");
-    let prefix = prefix.as_bytes();
-    let prefix_len = prefix.len().min(chunk_bytes);
-    chunk[..prefix_len].copy_from_slice(&prefix[..prefix_len]);
-    chunk[chunk_bytes - 1] = b'\n';
-    chunk
-}
-
-fn recv_expected_bytes(
+fn recv_target_bytes(
     rx: &mpsc::Receiver<OutData>,
-    expected_bytes: usize,
+    target_bytes: usize,
     timeout: Duration
-) -> eyre::Result<usize> {
-    let deadline = Instant::now() + timeout;
+) -> eyre::Result<Sample> {
+    let started = Instant::now();
+    let deadline = started + timeout;
     let mut received_bytes = 0;
     let mut messages = 0;
 
-    while received_bytes < expected_bytes {
+    while received_bytes < target_bytes {
         let now = Instant::now();
         if now >= deadline {
             return Err(eyre::eyre!(
-                "timed out after receiving {received_bytes}/{expected_bytes} bytes"
+                "timed out after receiving {received_bytes}/{target_bytes} bytes"
             ));
         }
 
@@ -167,13 +212,13 @@ fn recv_expected_bytes(
             Ok(chunk) => chunk,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 return Err(eyre::eyre!(
-                    "timed out after receiving {received_bytes}/{expected_bytes} bytes"
+                    "timed out after receiving {received_bytes}/{target_bytes} bytes"
                 ));
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 return Err(eyre::eyre!(
-                    "reader channel disconnected after receiving \
-                     {received_bytes}/{expected_bytes} bytes"
+                    "reader channel disconnected after receiving {received_bytes}/{target_bytes} \
+                     bytes"
                 ));
             }
         };
@@ -182,13 +227,7 @@ fn recv_expected_bytes(
         messages += 1;
     }
 
-    if received_bytes != expected_bytes {
-        return Err(eyre::eyre!(
-            "received {received_bytes} bytes, expected exactly {expected_bytes}"
-        ));
-    }
-
-    Ok(messages)
+    Ok(Sample { total: started.elapsed(), bytes: received_bytes, messages })
 }
 
 fn drain_stale_messages(rx: &mpsc::Receiver<OutData>) {
@@ -198,33 +237,33 @@ fn drain_stale_messages(rx: &mpsc::Receiver<OutData>) {
 fn print_report(reports: &[ReaderReport]) {
     println!(
         "{:<22} {:>12} {:>12} {:>12} {:>12} {:>12} {:>12}",
-        "reader", "avg ms", "median ms", "min ms", "p95 ms", "lag ms", "MiB/s"
+        "reader", "avg ms", "median ms", "min ms", "p95 ms", "MiB/s", "avg MiB"
     );
 
     for report in reports {
         let summary = Summary::new(report);
         println!(
-            "{:<22} {:>12.3} {:>12.3} {:>12.3} {:>12.3} {:>12.3} {:>12.2}",
+            "{:<22} {:>12.3} {:>12.3} {:>12.3} {:>12.3} {:>12.2} {:>12.3}",
             report.name,
             ms(summary.avg_total),
             ms(summary.median_total),
             ms(summary.min_total),
             ms(summary.p95_total),
-            ms(summary.avg_lag),
             summary.throughput_mib_s,
+            bytes_to_mib(summary.avg_bytes as usize),
         );
     }
 
     println!();
-    println!("{:<22} {:>12}", "reader", "avg messages");
+    println!("{:<22} {:>12} {:>12}", "reader", "target MiB", "avg messages");
     for report in reports {
-        let avg_messages = report
-            .samples
-            .iter()
-            .map(|sample| sample.messages as f64)
-            .sum::<f64>()
-            / report.samples.len() as f64;
-        println!("{:<22} {:>12.1}", report.name, avg_messages);
+        let summary = Summary::new(report);
+        println!(
+            "{:<22} {:>12.3} {:>12.1}",
+            report.name,
+            bytes_to_mib(report.target_bytes_per_run),
+            summary.avg_messages,
+        );
     }
 }
 
@@ -233,7 +272,8 @@ struct Summary {
     median_total:     Duration,
     min_total:        Duration,
     p95_total:        Duration,
-    avg_lag:          Duration,
+    avg_bytes:        f64,
+    avg_messages:     f64,
     throughput_mib_s: f64
 }
 
@@ -246,15 +286,29 @@ impl Summary {
         let median_total = percentile(&totals, 0.50);
         let min_total = totals[0];
         let p95_total = percentile(&totals, 0.95);
-        let avg_lag = average_duration(
-            report
-                .samples
-                .iter()
-                .map(|sample| sample.total.saturating_sub(sample.write))
-        );
-        let throughput_mib_s = bytes_to_mib(report.bytes_per_run) / avg_total.as_secs_f64();
+        let avg_bytes = report
+            .samples
+            .iter()
+            .map(|sample| sample.bytes as f64)
+            .sum::<f64>()
+            / report.samples.len() as f64;
+        let avg_messages = report
+            .samples
+            .iter()
+            .map(|sample| sample.messages as f64)
+            .sum::<f64>()
+            / report.samples.len() as f64;
+        let throughput_mib_s = bytes_to_mib(avg_bytes as usize) / avg_total.as_secs_f64();
 
-        Self { avg_total, median_total, min_total, p95_total, avg_lag, throughput_mib_s }
+        Self {
+            avg_total,
+            median_total,
+            min_total,
+            p95_total,
+            avg_bytes,
+            avg_messages,
+            throughput_mib_s
+        }
     }
 }
 
@@ -281,24 +335,4 @@ fn bytes_to_mib(bytes: usize) -> f64 {
 
 fn ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1_000.0
-}
-
-fn env_usize(name: &str, default: usize) -> eyre::Result<usize> {
-    match env::var(name) {
-        Ok(value) => value
-            .parse()
-            .map_err(|err| eyre::eyre!("invalid {name}={value:?}: {err}")),
-        Err(env::VarError::NotPresent) => Ok(default),
-        Err(err) => Err(err.into())
-    }
-}
-
-fn env_u64(name: &str, default: u64) -> eyre::Result<u64> {
-    match env::var(name) {
-        Ok(value) => value
-            .parse()
-            .map_err(|err| eyre::eyre!("invalid {name}={value:?}: {err}")),
-        Err(env::VarError::NotPresent) => Ok(default),
-        Err(err) => Err(err.into())
-    }
 }
