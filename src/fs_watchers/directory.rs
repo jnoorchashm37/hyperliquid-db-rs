@@ -35,7 +35,7 @@ impl DirectoryWatcher {
     //     let (tx, rx)
     // }
 
-    fn run_safe(mut self) -> eyre::Result<()> {
+    pub fn run_safe(mut self) -> eyre::Result<()> {
         let mut event_buf = [0_u8; 16 * 1024];
 
         loop {
