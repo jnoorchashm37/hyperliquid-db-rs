@@ -1,8 +1,8 @@
 use std::{path::Path, sync::mpsc, thread};
 
 use hyperliquid_db::fs_watchers::{
-    directory::{DirectoryWatcher, FsOutData},
-    types::HyperliquidDataDirKind
+    directory::DirectoryWatcher,
+    types::{FsOutData, HyperliquidDataDirKind}
 };
 
 pub fn spawn_file_reader(

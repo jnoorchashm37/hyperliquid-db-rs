@@ -2,8 +2,9 @@ use std::{path::PathBuf, sync::mpsc, time::Instant};
 
 use inotify::{EventMask, Inotify, WatchMask};
 
-use crate::fs_watchers::types::{
-    ActiveDirectory, FileTailState, FsOutData, HyperliquidDataDirKind
+use crate::{
+    fs_handlers::types::{ActiveDirectory, FileTailState, FsOutData},
+    hl_fs::HyperliquidDataDirKind
 };
 
 pub struct DirectoryWatcher {
@@ -15,14 +16,13 @@ pub struct DirectoryWatcher {
 impl DirectoryWatcher {
     pub fn new(
         name: HyperliquidDataDirKind,
-        dir_path: &PathBuf,
         out_tx: mpsc::Sender<eyre::Result<FsOutData>>
     ) -> eyre::Result<Self> {
-        let directory = ActiveDirectory::new(name, dir_path)?;
+        let directory = ActiveDirectory::new(name)?;
 
         let notifier = Inotify::init()?;
         notifier.watches().add(
-            dir_path,
+            name.dir_path(),
             WatchMask::CREATE | WatchMask::MODIFY | WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO
         )?;
 
@@ -30,10 +30,12 @@ impl DirectoryWatcher {
     }
 
     pub fn run(mut self) {
-        if let Err(error) = self.run_safe() {
-            eprintln!("error running filesystem reads: {error:?}");
-            self.out_tx.send(Err(error)).unwrap();
-        }
+        std::thread::spawn(move || {
+            if let Err(error) = self.run_safe() {
+                eprintln!("error running filesystem watcher: {error:?}");
+                self.out_tx.send(Err(error)).unwrap();
+            }
+        });
     }
 
     fn run_safe(&mut self) -> eyre::Result<()> {
@@ -60,7 +62,6 @@ impl DirectoryWatcher {
                 }
 
                 if !self.directory.file_states.contains_key(&path) {
-                    // New file: read from offset 0.
                     self.directory
                         .file_states
                         .insert(path.clone(), FileTailState::new(&path, false)?);
@@ -68,8 +69,8 @@ impl DirectoryWatcher {
 
                 if let Some(state) = self.directory.file_states.get_mut(&path) {
                     state.drain_new_bytes(|chunk| {
-                        // Replace with your parser / channel / sink.
                         self.out_tx.send(Ok(FsOutData {
+                            name: self.directory.name,
                             bytes: chunk.to_vec(),
                             path: path.display().to_string(),
                             chunk_len: chunk.len(),
@@ -91,15 +92,10 @@ mod tests {
 
     #[test]
     fn test_directory_watcher() {
-        let directory = Path::new("/var/lib/hyperliquid/hl/data/replica_cmds").to_path_buf();
         let (tx, rx) = mpsc::channel();
 
-        let watcher =
-            DirectoryWatcher::new(HyperliquidDataDirKind::ReplicaCmds, &directory, tx).unwrap();
-
-        std::thread::spawn(move || {
-            watcher.run();
-        });
+        let watcher = DirectoryWatcher::new(HyperliquidDataDirKind::ReplicaCmds, tx).unwrap();
+        watcher.run();
 
         loop {
             let t = rx.recv().unwrap().unwrap();

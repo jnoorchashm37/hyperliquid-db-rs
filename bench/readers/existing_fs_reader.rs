@@ -7,7 +7,7 @@ use std::{
     time::Instant
 };
 
-use hyperliquid_db::fs_watchers::{directory::FsOutData, types::HyperliquidDataDirKind};
+use hyperliquid_db::fs_watchers::types::{FsOutData, HyperliquidDataDirKind};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 
 pub fn spawn_file_reader(
@@ -126,6 +126,7 @@ impl ExistingFsReader {
         let chunk_len = data.len();
 
         self.out_tx.send(Ok(FsOutData {
+            name: HyperliquidDataDirKind::NodeSlowBlockTimes,
             bytes: data.into_bytes(),
             path,
             chunk_len,

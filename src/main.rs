@@ -1,3 +1,5 @@
+use hyperliquid_db::run_stream;
+
 fn main() {
-    println!("Hello, world!");
+    hyperliquid_db::run_stream().unwrap();
 }

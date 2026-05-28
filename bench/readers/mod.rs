@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant}
 };
 
-use hyperliquid_db::fs_watchers::{directory::FsOutData, types::HyperliquidDataDirKind};
+use hyperliquid_db::fs_watchers::types::{FsOutData, HyperliquidDataDirKind};
 
 const BENCHMARK_DIRECTORY: &str = "/var/lib/hyperliquid/hl/data/node_slow_block_times";
 const BENCHMARK_RUNS: usize = 10;

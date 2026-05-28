@@ -19,5 +19,5 @@ tempfile = "3"
 
 [[bench]]
 name = "fs_watching"
-path = "src/bench/fs_watching.rs"
+path = "bench/fs_watching.rs"
 harness = false
