@@ -19,7 +19,7 @@ impl HyperliquidDataDirKind {
         let ext_dir = match self {
             HyperliquidDataDirKind::ReplicaCmds => "replica_cmds",
             HyperliquidDataDirKind::NodeSlowBlockTimes => "node_slow_block_times",
-            HyperliquidDataDirKind::NodeFillsStreaming => "node_fills_streaming/hourly"
+            HyperliquidDataDirKind::NodeFillsStreaming => "node_fills_streaming"
         };
 
         base_dir.join(ext_dir)
