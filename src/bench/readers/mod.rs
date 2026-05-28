@@ -16,7 +16,7 @@ use hyperliquid_db::fs_watchers::{directory::OutData, types::HyperliquidDataDirK
 const BENCHMARK_DIRECTORY: &str = "/var/lib/hyperliquid/hl/data/node_slow_block_times";
 const BENCHMARK_RUNS: usize = 10;
 const BENCHMARK_CHUNKS: usize = 100;
-const BENCHMARK_CHUNK_BYTES: usize = 1_024;
+const BENCHMARK_CHUNK_BYTES: usize = 256;
 const BENCHMARK_READY_MS: u64 = 100;
 const BENCHMARK_RECV_TIMEOUT_MS: u64 = 1_000_000;
 
