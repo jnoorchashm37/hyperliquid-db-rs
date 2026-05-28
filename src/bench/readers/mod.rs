@@ -1,4 +1,4 @@
-// #![cfg(target_os = "linux")]
+#![cfg(target_os = "linux")]
 
 mod current_impl;
 mod existing_fs_reader;
@@ -6,12 +6,12 @@ mod existing_fs_reader;
 use std::{
     path::Path,
     process,
-    sync::{mpsc, Arc, Barrier},
+    sync::{Arc, Barrier, mpsc},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant}
 };
 
-use hyperliquid_db::fs_watchers::{directory::OutData, types::HyperliquidDataDirKind};
+use hyperliquid_db::fs_watchers::{directory::FsOutData, types::HyperliquidDataDirKind};
 
 const BENCHMARK_DIRECTORY: &str = "/var/lib/hyperliquid/hl/data/node_slow_block_times";
 const BENCHMARK_RUNS: usize = 10;
@@ -20,7 +20,8 @@ const BENCHMARK_CHUNK_BYTES: usize = 256;
 const BENCHMARK_READY_MS: u64 = 100;
 const BENCHMARK_RECV_TIMEOUT_MS: u64 = 100_000;
 
-type SpawnReader = fn(HyperliquidDataDirKind, &Path) -> eyre::Result<mpsc::Receiver<OutData>>;
+type SpawnReader =
+    fn(HyperliquidDataDirKind, &Path) -> eyre::Result<mpsc::Receiver<eyre::Result<FsOutData>>>;
 
 pub fn run_fs_readers_bench() {
     if let Err(err) = run() {
@@ -54,7 +55,7 @@ fn run() -> eyre::Result<()> {
         spawn_reader_collector(
             "existing_fs_reader",
             existing_fs_reader::spawn_file_reader,
-            directory,
+            directory
         )?,
     ];
     thread::sleep(config.ready_delay);
@@ -67,11 +68,11 @@ fn run() -> eyre::Result<()> {
 
 #[derive(Clone, Copy)]
 struct BenchConfig {
-    runs: usize,
-    chunks: usize,
-    chunk_bytes: usize,
-    ready_delay: Duration,
-    recv_timeout: Duration,
+    runs:         usize,
+    chunks:       usize,
+    chunk_bytes:  usize,
+    ready_delay:  Duration,
+    recv_timeout: Duration
 }
 
 impl BenchConfig {
@@ -92,32 +93,32 @@ impl Default for BenchConfig {
 }
 
 struct ReaderCollector {
-    name: &'static str,
+    name:       &'static str,
     command_tx: mpsc::Sender<CollectorCommand>,
-    result_rx: mpsc::Receiver<Result<Sample, String>>,
+    result_rx:  mpsc::Receiver<Result<Sample, String>>
 }
 
 enum CollectorCommand {
     Sample { target_bytes: usize, timeout: Duration, barrier: Arc<Barrier> },
-    Stop,
+    Stop
 }
 
 struct ReaderReport {
-    name: &'static str,
+    name:                 &'static str,
     target_bytes_per_run: usize,
-    samples: Vec<Sample>,
+    samples:              Vec<Sample>
 }
 
 struct Sample {
-    total: Duration,
-    bytes: usize,
-    notification_to_channel: Vec<Duration>,
+    total:                   Duration,
+    bytes:                   usize,
+    notification_to_channel: Vec<Duration>
 }
 
 fn spawn_reader_collector(
     name: &'static str,
     spawn_reader: SpawnReader,
-    directory: &Path,
+    directory: &Path
 ) -> eyre::Result<ReaderCollector> {
     let rx = spawn_reader(HyperliquidDataDirKind::ReplicaCmds, directory)?;
     let (command_tx, command_rx) = mpsc::channel();
@@ -136,7 +137,7 @@ fn spawn_reader_collector(
                         break;
                     }
                 }
-                CollectorCommand::Stop => break,
+                CollectorCommand::Stop => break
             }
         }
     });
@@ -146,14 +147,14 @@ fn spawn_reader_collector(
 
 fn benchmark_collectors(
     collectors: Vec<ReaderCollector>,
-    config: &BenchConfig,
+    config: &BenchConfig
 ) -> eyre::Result<Vec<ReaderReport>> {
     let mut reports: Vec<ReaderReport> = collectors
         .iter()
         .map(|collector| ReaderReport {
-            name: collector.name,
+            name:                 collector.name,
             target_bytes_per_run: config.bytes_per_run(),
-            samples: Vec::with_capacity(config.runs),
+            samples:              Vec::with_capacity(config.runs)
         })
         .collect();
 
@@ -164,8 +165,8 @@ fn benchmark_collectors(
                 .command_tx
                 .send(CollectorCommand::Sample {
                     target_bytes: config.bytes_per_run(),
-                    timeout: config.recv_timeout,
-                    barrier: barrier.clone(),
+                    timeout:      config.recv_timeout,
+                    barrier:      barrier.clone()
                 })
                 .map_err(|_| eyre::eyre!("{} collector stopped", collector.name))?;
         }
@@ -190,9 +191,9 @@ fn benchmark_collectors(
 }
 
 fn recv_target_bytes(
-    rx: &mpsc::Receiver<OutData>,
+    rx: &mpsc::Receiver<eyre::Result<FsOutData>>,
     target_bytes: usize,
-    timeout: Duration,
+    timeout: Duration
 ) -> eyre::Result<Sample> {
     let started = Instant::now();
     let deadline = started + timeout;
@@ -208,7 +209,7 @@ fn recv_target_bytes(
         }
 
         let chunk = match rx.recv_timeout(deadline - now) {
-            Ok(chunk) => chunk,
+            Ok(chunk) => chunk.unwrap(),
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 return Err(eyre::eyre!(
                     "timed out after receiving {received_bytes}/{target_bytes} bytes"
@@ -232,7 +233,7 @@ fn recv_target_bytes(
     Ok(Sample { total: started.elapsed(), bytes: received_bytes, notification_to_channel })
 }
 
-fn drain_stale_messages(rx: &mpsc::Receiver<OutData>) {
+fn drain_stale_messages(rx: &mpsc::Receiver<eyre::Result<FsOutData>>) {
     while rx.try_recv().is_ok() {}
 }
 
@@ -270,13 +271,13 @@ fn print_report(reports: &[ReaderReport]) {
 }
 
 struct Summary {
-    avg_total: Duration,
-    p95_total: Duration,
+    avg_total:                   Duration,
+    p95_total:                   Duration,
     avg_notification_to_channel: Duration,
     p95_notification_to_channel: Duration,
-    avg_bytes: f64,
-    avg_messages: f64,
-    throughput_mib_s: f64,
+    avg_bytes:                   f64,
+    avg_messages:                f64,
+    throughput_mib_s:            f64
 }
 
 impl Summary {
@@ -315,7 +316,7 @@ impl Summary {
             p95_notification_to_channel,
             avg_bytes,
             avg_messages,
-            throughput_mib_s,
+            throughput_mib_s
         }
     }
 }

@@ -2,19 +2,21 @@ use std::{path::PathBuf, sync::mpsc, time::Instant};
 
 use inotify::{EventMask, Inotify, WatchMask};
 
-use crate::fs_watchers::types::{ActiveDirectory, FileTailState, HyperliquidDataDirKind};
+use crate::fs_watchers::types::{
+    ActiveDirectory, FileTailState, FsOutData, HyperliquidDataDirKind
+};
 
 pub struct DirectoryWatcher {
     directory: ActiveDirectory,
     notifier:  Inotify,
-    out_tx:    mpsc::Sender<OutData>
+    out_tx:    mpsc::Sender<eyre::Result<FsOutData>>
 }
 
 impl DirectoryWatcher {
     pub fn new(
         name: HyperliquidDataDirKind,
         dir_path: &PathBuf,
-        out_tx: mpsc::Sender<OutData>
+        out_tx: mpsc::Sender<eyre::Result<FsOutData>>
     ) -> eyre::Result<Self> {
         let directory = ActiveDirectory::new(name, dir_path)?;
 
@@ -27,11 +29,14 @@ impl DirectoryWatcher {
         Ok(Self { directory, notifier, out_tx })
     }
 
-    // fn run(self) {
-    //     let (tx, rx)
-    // }
+    pub fn run(mut self) {
+        if let Err(error) = self.run_safe() {
+            eprintln!("error running filesystem reads: {error:?}");
+            self.out_tx.send(Err(error)).unwrap();
+        }
+    }
 
-    pub fn run_safe(mut self) -> eyre::Result<()> {
+    fn run_safe(&mut self) -> eyre::Result<()> {
         let mut event_buf = [0_u8; 16 * 1024];
 
         loop {
@@ -64,26 +69,18 @@ impl DirectoryWatcher {
                 if let Some(state) = self.directory.file_states.get_mut(&path) {
                     state.drain_new_bytes(|chunk| {
                         // Replace with your parser / channel / sink.
-                        self.out_tx.send(OutData {
+                        self.out_tx.send(Ok(FsOutData {
                             bytes: chunk.to_vec(),
                             path: path.display().to_string(),
                             chunk_len: chunk.len(),
                             notification_received_at
-                        })?;
+                        }))?;
                         Ok(())
                     })?;
                 }
             }
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct OutData {
-    pub bytes:                    Vec<u8>,
-    pub path:                     String,
-    pub chunk_len:                usize,
-    pub notification_received_at: Instant
 }
 
 #[cfg(test)]
@@ -101,11 +98,11 @@ mod tests {
             DirectoryWatcher::new(HyperliquidDataDirKind::ReplicaCmds, &directory, tx).unwrap();
 
         std::thread::spawn(move || {
-            watcher.run_safe().unwrap();
+            watcher.run();
         });
 
         loop {
-            let t = rx.recv().unwrap();
+            let t = rx.recv().unwrap().unwrap();
             println!("{t:?}");
         }
     }

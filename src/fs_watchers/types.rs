@@ -1,4 +1,7 @@
-use std::{collections::HashMap, fmt, fs, os::unix::fs::FileExt, path::PathBuf, str::FromStr};
+use std::{
+    collections::HashMap, fmt, fs, os::unix::fs::FileExt, path::PathBuf, str::FromStr,
+    time::Instant
+};
 
 pub struct ActiveDirectory {
     pub name:        HyperliquidDataDirKind,
@@ -87,4 +90,12 @@ impl FileTailState {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct FsOutData {
+    pub bytes:                    Vec<u8>,
+    pub path:                     String,
+    pub chunk_len:                usize,
+    pub notification_received_at: Instant
 }

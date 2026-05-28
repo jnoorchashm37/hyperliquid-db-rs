@@ -4,23 +4,25 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
-    time::Instant,
+    time::Instant
 };
 
-use hyperliquid_db::fs_watchers::{directory::OutData, types::HyperliquidDataDirKind};
+use hyperliquid_db::fs_watchers::{directory::FsOutData, types::HyperliquidDataDirKind};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 
 pub fn spawn_file_reader(
     _name: HyperliquidDataDirKind,
-    dir_path: &Path,
-) -> eyre::Result<mpsc::Receiver<OutData>> {
+    dir_path: &Path
+) -> eyre::Result<mpsc::Receiver<eyre::Result<FsOutData>>> {
     let directory = dir_path.canonicalize()?;
     let (out_tx, out_rx) = mpsc::channel();
     let (fs_event_tx, fs_event_rx) = mpsc::channel();
 
     let mut watcher = notify::recommended_watcher(move |res| {
-        let _ =
-            fs_event_tx.send(TimedFsEvent { event: res, notification_received_at: Instant::now() });
+        let _ = fs_event_tx.send(TimedFsEvent {
+            event:                    res,
+            notification_received_at: Instant::now()
+        });
     })?;
     watcher.watch(&directory, RecursiveMode::Recursive)?;
 
@@ -38,19 +40,19 @@ pub fn spawn_file_reader(
 struct ExistingFsReader {
     current_file: Option<File>,
     current_path: Option<PathBuf>,
-    out_tx: mpsc::Sender<OutData>,
+    out_tx:       mpsc::Sender<eyre::Result<FsOutData>>
 }
 
 struct TimedFsEvent {
-    event: notify::Result<Event>,
-    notification_received_at: Instant,
+    event:                    notify::Result<Event>,
+    notification_received_at: Instant
 }
 
 impl ExistingFsReader {
     fn run(
         &mut self,
         fs_event_rx: mpsc::Receiver<TimedFsEvent>,
-        _watcher: RecommendedWatcher,
+        _watcher: RecommendedWatcher
     ) -> eyre::Result<()> {
         while let Ok(timed_event) = fs_event_rx.recv() {
             let event = timed_event.event?;
@@ -73,7 +75,7 @@ impl ExistingFsReader {
     fn on_file_creation(
         &mut self,
         new_file: PathBuf,
-        notification_received_at: Instant,
+        notification_received_at: Instant
     ) -> eyre::Result<()> {
         if !new_file.is_file() {
             return Ok(());
@@ -89,7 +91,7 @@ impl ExistingFsReader {
     fn on_file_modification(
         &mut self,
         new_file: PathBuf,
-        notification_received_at: Instant,
+        notification_received_at: Instant
     ) -> eyre::Result<()> {
         if !new_file.is_file() {
             return Ok(());
@@ -123,12 +125,12 @@ impl ExistingFsReader {
             .map_or_else(String::new, |path| path.display().to_string());
         let chunk_len = data.len();
 
-        self.out_tx.send(OutData {
+        self.out_tx.send(Ok(FsOutData {
             bytes: data.into_bytes(),
             path,
             chunk_len,
-            notification_received_at,
-        })?;
+            notification_received_at
+        }))?;
 
         Ok(())
     }
