@@ -18,7 +18,7 @@ const BENCHMARK_RUNS: usize = 10;
 const BENCHMARK_CHUNKS: usize = 100;
 const BENCHMARK_CHUNK_BYTES: usize = 256;
 const BENCHMARK_READY_MS: u64 = 100;
-const BENCHMARK_RECV_TIMEOUT_MS: u64 = 1_000_000;
+const BENCHMARK_RECV_TIMEOUT_MS: u64 = 100_000;
 
 type SpawnReader = fn(HyperliquidDataDirKind, &Path) -> eyre::Result<mpsc::Receiver<OutData>>;
 
