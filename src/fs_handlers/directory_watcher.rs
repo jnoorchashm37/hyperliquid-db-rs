@@ -94,7 +94,8 @@ mod tests {
     fn test_directory_watcher() {
         let (tx, rx) = mpsc::channel();
 
-        let watcher = DirectoryWatcher::new(HyperliquidDataDirKind::ReplicaCmds, tx).unwrap();
+        let watcher =
+            DirectoryWatcher::new(HyperliquidDataDirKind::NodeFillsStreaming, tx).unwrap();
         watcher.run();
 
         loop {
