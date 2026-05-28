@@ -15,7 +15,14 @@ pub enum HyperliquidDataDirKind {
 
 impl HyperliquidDataDirKind {
     pub fn dir_path(&self) -> PathBuf {
-        Path::new(HYPERLIQUID_DATA_DIR).join(self.to_string())
+        let base_dir = Path::new(HYPERLIQUID_DATA_DIR);
+        let ext_dir = match self {
+            HyperliquidDataDirKind::ReplicaCmds => "replica_cmds",
+            HyperliquidDataDirKind::NodeSlowBlockTimes => "node_slow_block_times",
+            HyperliquidDataDirKind::NodeFillsStreaming => "node_fills_streaming/hourly"
+        };
+
+        base_dir.join(ext_dir)
     }
 }
 
