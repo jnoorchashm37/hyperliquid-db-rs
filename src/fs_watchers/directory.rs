@@ -6,22 +6,22 @@ use crate::fs_watchers::types::{ActiveDirectory, FileTailState, HyperliquidDataD
 
 pub struct DirectoryWatcher {
     directory: ActiveDirectory,
-    notifier: Inotify,
-    out_tx: mpsc::Sender<OutData>,
+    notifier:  Inotify,
+    out_tx:    mpsc::Sender<OutData>
 }
 
 impl DirectoryWatcher {
     pub fn new(
         name: HyperliquidDataDirKind,
         dir_path: &PathBuf,
-        out_tx: mpsc::Sender<OutData>,
+        out_tx: mpsc::Sender<OutData>
     ) -> eyre::Result<Self> {
         let directory = ActiveDirectory::new(name, dir_path)?;
 
         let notifier = Inotify::init()?;
         notifier.watches().add(
             dir_path,
-            WatchMask::CREATE | WatchMask::MODIFY | WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO,
+            WatchMask::CREATE | WatchMask::MODIFY | WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO
         )?;
 
         Ok(Self { directory, notifier, out_tx })
@@ -36,8 +36,8 @@ impl DirectoryWatcher {
 
         loop {
             let events = self.notifier.read_events_blocking(&mut event_buf)?;
+            let notification_received_at = Instant::now();
             for event in events {
-                let notification_received_at = Instant::now();
                 if event.mask.contains(EventMask::Q_OVERFLOW) {
                     // Production code: full rescan here.
                     return Err(eyre::eyre!(
@@ -68,7 +68,7 @@ impl DirectoryWatcher {
                             bytes: chunk.to_vec(),
                             path: path.display().to_string(),
                             chunk_len: chunk.len(),
-                            notification_received_at,
+                            notification_received_at
                         })?;
                         Ok(())
                     })?;
@@ -80,16 +80,17 @@ impl DirectoryWatcher {
 
 #[derive(Debug, Clone)]
 pub struct OutData {
-    pub bytes: Vec<u8>,
-    pub path: String,
-    pub chunk_len: usize,
-    pub notification_received_at: Instant,
+    pub bytes:                    Vec<u8>,
+    pub path:                     String,
+    pub chunk_len:                usize,
+    pub notification_received_at: Instant
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::Path;
+
+    use super::*;
 
     #[test]
     fn test_directory_watcher() {
