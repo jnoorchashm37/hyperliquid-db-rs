@@ -1,3 +1,3 @@
-fn main() {
-    hyperliquid_db::run_stream().unwrap();
+fn main() -> eyre::Result<()> {
+    hyperliquid_db::run_stream()
 }
