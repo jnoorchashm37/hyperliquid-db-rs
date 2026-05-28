@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::mpsc};
+use std::{path::PathBuf, sync::mpsc, time::Instant};
 
 use inotify::{EventMask, Inotify, WatchMask};
 
@@ -37,6 +37,7 @@ impl DirectoryWatcher {
         loop {
             let events = self.notifier.read_events_blocking(&mut event_buf)?;
             for event in events {
+                let notification_received_at = Instant::now();
                 if event.mask.contains(EventMask::Q_OVERFLOW) {
                     // Production code: full rescan here.
                     return Err(eyre::eyre!(
@@ -67,6 +68,7 @@ impl DirectoryWatcher {
                             bytes: chunk.to_vec(),
                             path: path.display().to_string(),
                             chunk_len: chunk.len(),
+                            notification_received_at,
                         })?;
                         Ok(())
                     })?;
@@ -81,6 +83,7 @@ pub struct OutData {
     pub bytes: Vec<u8>,
     pub path: String,
     pub chunk_len: usize,
+    pub notification_received_at: Instant,
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@ fn main() {
     eprintln!("Run this benchmark on Linux with: cargo bench --bench fs_watching");
 }
 
+#[cfg(target_os = "linux")]
 mod readers;
 
 #[cfg(target_os = "linux")]

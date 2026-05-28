@@ -6,9 +6,9 @@ mod existing_fs_reader;
 use std::{
     path::Path,
     process,
-    sync::{Arc, Barrier, mpsc},
+    sync::{mpsc, Arc, Barrier},
     thread,
-    time::{Duration, Instant}
+    time::{Duration, Instant},
 };
 
 use hyperliquid_db::fs_watchers::{directory::OutData, types::HyperliquidDataDirKind};
@@ -42,8 +42,8 @@ fn run() -> eyre::Result<()> {
     println!("fs_watching benchmark");
     println!("directory: {}", directory.display());
     println!("runs: {}", config.runs);
-    println!("target chunks/run: {}", config.chunks);
-    println!("target chunk bytes: {}", config.chunk_bytes);
+    println!("target nominal chunks/run: {}", config.chunks);
+    println!("target nominal chunk bytes: {}", config.chunk_bytes);
     println!("target bytes/run: {}", config.bytes_per_run());
     println!("ready delay: {:.3} ms", ms(config.ready_delay));
     println!("recv timeout/run: {:.3} ms", ms(config.recv_timeout));
@@ -54,7 +54,7 @@ fn run() -> eyre::Result<()> {
         spawn_reader_collector(
             "existing_fs_reader",
             existing_fs_reader::spawn_file_reader,
-            directory
+            directory,
         )?,
     ];
     thread::sleep(config.ready_delay);
@@ -67,11 +67,11 @@ fn run() -> eyre::Result<()> {
 
 #[derive(Clone, Copy)]
 struct BenchConfig {
-    runs:         usize,
-    chunks:       usize,
-    chunk_bytes:  usize,
-    ready_delay:  Duration,
-    recv_timeout: Duration
+    runs: usize,
+    chunks: usize,
+    chunk_bytes: usize,
+    ready_delay: Duration,
+    recv_timeout: Duration,
 }
 
 impl BenchConfig {
@@ -92,33 +92,32 @@ impl Default for BenchConfig {
 }
 
 struct ReaderCollector {
-    name:       &'static str,
+    name: &'static str,
     command_tx: mpsc::Sender<CollectorCommand>,
-    result_rx:  mpsc::Receiver<Result<Sample, String>>
+    result_rx: mpsc::Receiver<Result<Sample, String>>,
 }
 
 enum CollectorCommand {
     Sample { target_bytes: usize, timeout: Duration, barrier: Arc<Barrier> },
-    Stop
+    Stop,
 }
 
 struct ReaderReport {
-    name:                 &'static str,
+    name: &'static str,
     target_bytes_per_run: usize,
-    samples:              Vec<Sample>
+    samples: Vec<Sample>,
 }
 
-#[derive(Clone, Copy)]
 struct Sample {
-    total:    Duration,
-    bytes:    usize,
-    messages: usize
+    total: Duration,
+    bytes: usize,
+    notification_to_channel: Vec<Duration>,
 }
 
 fn spawn_reader_collector(
     name: &'static str,
     spawn_reader: SpawnReader,
-    directory: &Path
+    directory: &Path,
 ) -> eyre::Result<ReaderCollector> {
     let rx = spawn_reader(HyperliquidDataDirKind::ReplicaCmds, directory)?;
     let (command_tx, command_rx) = mpsc::channel();
@@ -137,7 +136,7 @@ fn spawn_reader_collector(
                         break;
                     }
                 }
-                CollectorCommand::Stop => break
+                CollectorCommand::Stop => break,
             }
         }
     });
@@ -147,14 +146,14 @@ fn spawn_reader_collector(
 
 fn benchmark_collectors(
     collectors: Vec<ReaderCollector>,
-    config: &BenchConfig
+    config: &BenchConfig,
 ) -> eyre::Result<Vec<ReaderReport>> {
     let mut reports: Vec<ReaderReport> = collectors
         .iter()
         .map(|collector| ReaderReport {
-            name:                 collector.name,
+            name: collector.name,
             target_bytes_per_run: config.bytes_per_run(),
-            samples:              Vec::with_capacity(config.runs)
+            samples: Vec::with_capacity(config.runs),
         })
         .collect();
 
@@ -165,8 +164,8 @@ fn benchmark_collectors(
                 .command_tx
                 .send(CollectorCommand::Sample {
                     target_bytes: config.bytes_per_run(),
-                    timeout:      config.recv_timeout,
-                    barrier:      barrier.clone()
+                    timeout: config.recv_timeout,
+                    barrier: barrier.clone(),
                 })
                 .map_err(|_| eyre::eyre!("{} collector stopped", collector.name))?;
         }
@@ -193,12 +192,12 @@ fn benchmark_collectors(
 fn recv_target_bytes(
     rx: &mpsc::Receiver<OutData>,
     target_bytes: usize,
-    timeout: Duration
+    timeout: Duration,
 ) -> eyre::Result<Sample> {
     let started = Instant::now();
     let deadline = started + timeout;
     let mut received_bytes = 0;
-    let mut messages = 0;
+    let mut notification_to_channel = Vec::new();
 
     while received_bytes < target_bytes {
         let now = Instant::now();
@@ -223,11 +222,14 @@ fn recv_target_bytes(
             }
         };
 
+        let channel_received_at = Instant::now();
+        notification_to_channel
+            .push(channel_received_at.saturating_duration_since(chunk.notification_received_at));
+
         received_bytes += chunk.bytes.len();
-        messages += 1;
     }
 
-    Ok(Sample { total: started.elapsed(), bytes: received_bytes, messages })
+    Ok(Sample { total: started.elapsed(), bytes: received_bytes, notification_to_channel })
 }
 
 fn drain_stale_messages(rx: &mpsc::Receiver<OutData>) {
@@ -236,26 +238,26 @@ fn drain_stale_messages(rx: &mpsc::Receiver<OutData>) {
 
 fn print_report(reports: &[ReaderReport]) {
     println!(
-        "{:<22} {:>12} {:>12} {:>12} {:>12} {:>12} {:>12}",
-        "reader", "avg ms", "median ms", "min ms", "p95 ms", "MiB/s", "avg MiB"
+        "{:<22} {:>12} {:>12} {:>12} {:>12} {:>14} {:>14}",
+        "reader", "wall avg", "wall p95", "MiB/s", "avg MiB", "notify avg", "notify p95"
     );
 
     for report in reports {
         let summary = Summary::new(report);
         println!(
-            "{:<22} {:>12.3} {:>12.3} {:>12.3} {:>12.3} {:>12.2} {:>12.3}",
+            "{:<22} {:>12.3} {:>12.3} {:>12.2} {:>12.3} {:>14.3} {:>14.3}",
             report.name,
             ms(summary.avg_total),
-            ms(summary.median_total),
-            ms(summary.min_total),
             ms(summary.p95_total),
             summary.throughput_mib_s,
             bytes_to_mib(summary.avg_bytes as usize),
+            micros(summary.avg_notification_to_channel),
+            micros(summary.p95_notification_to_channel),
         );
     }
 
     println!();
-    println!("{:<22} {:>12} {:>12}", "reader", "target MiB", "avg messages");
+    println!("{:<22} {:>12} {:>12}", "reader", "target MiB", "avg chunks");
     for report in reports {
         let summary = Summary::new(report);
         println!(
@@ -268,13 +270,13 @@ fn print_report(reports: &[ReaderReport]) {
 }
 
 struct Summary {
-    avg_total:        Duration,
-    median_total:     Duration,
-    min_total:        Duration,
-    p95_total:        Duration,
-    avg_bytes:        f64,
-    avg_messages:     f64,
-    throughput_mib_s: f64
+    avg_total: Duration,
+    p95_total: Duration,
+    avg_notification_to_channel: Duration,
+    p95_notification_to_channel: Duration,
+    avg_bytes: f64,
+    avg_messages: f64,
+    throughput_mib_s: f64,
 }
 
 impl Summary {
@@ -283,9 +285,15 @@ impl Summary {
         totals.sort_unstable();
 
         let avg_total = average_duration(totals.iter().copied());
-        let median_total = percentile(&totals, 0.50);
-        let min_total = totals[0];
         let p95_total = percentile(&totals, 0.95);
+        let mut notification_to_channel = report
+            .samples
+            .iter()
+            .flat_map(|sample| sample.notification_to_channel.iter().copied())
+            .collect::<Vec<_>>();
+        notification_to_channel.sort_unstable();
+        let avg_notification_to_channel = average_duration(notification_to_channel.iter().copied());
+        let p95_notification_to_channel = percentile(&notification_to_channel, 0.95);
         let avg_bytes = report
             .samples
             .iter()
@@ -295,19 +303,19 @@ impl Summary {
         let avg_messages = report
             .samples
             .iter()
-            .map(|sample| sample.messages as f64)
+            .map(|sample| sample.notification_to_channel.len() as f64)
             .sum::<f64>()
             / report.samples.len() as f64;
         let throughput_mib_s = bytes_to_mib(avg_bytes as usize) / avg_total.as_secs_f64();
 
         Self {
             avg_total,
-            median_total,
-            min_total,
             p95_total,
+            avg_notification_to_channel,
+            p95_notification_to_channel,
             avg_bytes,
             avg_messages,
-            throughput_mib_s
+            throughput_mib_s,
         }
     }
 }
@@ -335,4 +343,8 @@ fn bytes_to_mib(bytes: usize) -> f64 {
 
 fn ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1_000.0
+}
+
+fn micros(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1_000_000.0
 }

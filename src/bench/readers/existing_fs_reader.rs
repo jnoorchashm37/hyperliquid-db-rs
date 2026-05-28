@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
+    time::Instant,
 };
 
 use hyperliquid_db::fs_watchers::{directory::OutData, types::HyperliquidDataDirKind};
@@ -18,7 +19,8 @@ pub fn spawn_file_reader(
     let (fs_event_tx, fs_event_rx) = mpsc::channel();
 
     let mut watcher = notify::recommended_watcher(move |res| {
-        let _ = fs_event_tx.send(res);
+        let _ =
+            fs_event_tx.send(TimedFsEvent { event: res, notification_received_at: Instant::now() });
     })?;
     watcher.watch(&directory, RecursiveMode::Recursive)?;
 
@@ -39,22 +41,28 @@ struct ExistingFsReader {
     out_tx: mpsc::Sender<OutData>,
 }
 
+struct TimedFsEvent {
+    event: notify::Result<Event>,
+    notification_received_at: Instant,
+}
+
 impl ExistingFsReader {
     fn run(
         &mut self,
-        fs_event_rx: mpsc::Receiver<notify::Result<Event>>,
+        fs_event_rx: mpsc::Receiver<TimedFsEvent>,
         _watcher: RecommendedWatcher,
     ) -> eyre::Result<()> {
-        while let Ok(event) = fs_event_rx.recv() {
-            let event = event?;
+        while let Ok(timed_event) = fs_event_rx.recv() {
+            let event = timed_event.event?;
+            let notification_received_at = timed_event.notification_received_at;
 
             if event.kind.is_create() {
                 for path in event.paths {
-                    self.on_file_creation(path)?;
+                    self.on_file_creation(path, notification_received_at)?;
                 }
             } else if event.kind.is_modify() {
                 for path in event.paths {
-                    self.on_file_modification(path)?;
+                    self.on_file_modification(path, notification_received_at)?;
                 }
             }
         }
@@ -62,25 +70,33 @@ impl ExistingFsReader {
         Err(eyre::eyre!("notify file event channel closed"))
     }
 
-    fn on_file_creation(&mut self, new_file: PathBuf) -> eyre::Result<()> {
+    fn on_file_creation(
+        &mut self,
+        new_file: PathBuf,
+        notification_received_at: Instant,
+    ) -> eyre::Result<()> {
         if !new_file.is_file() {
             return Ok(());
         }
 
-        self.flush_current_file()?;
+        self.flush_current_file(notification_received_at)?;
         self.current_file = Some(File::open(&new_file)?);
         self.current_path = Some(new_file);
 
         Ok(())
     }
 
-    fn on_file_modification(&mut self, new_file: PathBuf) -> eyre::Result<()> {
+    fn on_file_modification(
+        &mut self,
+        new_file: PathBuf,
+        notification_received_at: Instant,
+    ) -> eyre::Result<()> {
         if !new_file.is_file() {
             return Ok(());
         }
 
         if self.current_file.is_some() {
-            self.flush_current_file()
+            self.flush_current_file(notification_received_at)
         } else {
             let mut file = File::open(&new_file)?;
             file.seek(SeekFrom::End(0))?;
@@ -90,7 +106,7 @@ impl ExistingFsReader {
         }
     }
 
-    fn flush_current_file(&mut self) -> eyre::Result<()> {
+    fn flush_current_file(&mut self, notification_received_at: Instant) -> eyre::Result<()> {
         let Some(file) = self.current_file.as_mut() else {
             return Ok(());
         };
@@ -107,8 +123,12 @@ impl ExistingFsReader {
             .map_or_else(String::new, |path| path.display().to_string());
         let chunk_len = data.len();
 
-        self.out_tx
-            .send(OutData { bytes: data.into_bytes(), path, chunk_len })?;
+        self.out_tx.send(OutData {
+            bytes: data.into_bytes(),
+            path,
+            chunk_len,
+            notification_received_at,
+        })?;
 
         Ok(())
     }
