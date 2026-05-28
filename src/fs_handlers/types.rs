@@ -1,4 +1,10 @@
-use std::{collections::HashMap, fmt, fs, os::unix::fs::FileExt, path::PathBuf, time::Instant};
+use std::{
+    collections::HashMap,
+    fs,
+    os::unix::fs::FileExt,
+    path::{Path, PathBuf},
+    time::Instant
+};
 
 use crate::hl_fs::HyperliquidDataDirKind;
 
@@ -13,15 +19,32 @@ impl ActiveDirectory {
         let dir_path = name.dir_path();
         let mut file_states: HashMap<PathBuf, FileTailState> = HashMap::new();
 
-        for entry in fs::read_dir(&dir_path)? {
-            let path = entry?.path();
-            if path.is_file() {
-                file_states.insert(path.clone(), FileTailState::new(&path, true)?);
-            }
-        }
+        collect_file_states(&dir_path, true, &mut file_states)?;
 
         Ok(Self { name, dir_path, file_states })
     }
+}
+
+fn collect_file_states(
+    dir_path: &Path,
+    start_at_end: bool,
+    file_states: &mut HashMap<PathBuf, FileTailState>
+) -> eyre::Result<()> {
+    for entry in fs::read_dir(dir_path)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+
+        if file_type.is_dir() {
+            collect_file_states(&path, start_at_end, file_states)?;
+        } else if file_type.is_file() {
+            file_states
+                .entry(path.clone())
+                .or_insert(FileTailState::new(&path, start_at_end)?);
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug)]

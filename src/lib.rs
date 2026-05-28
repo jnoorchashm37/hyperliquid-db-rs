@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::mpsc
-};
+use std::sync::mpsc;
 
 use crate::{
     fs_handlers::{directory_watcher::DirectoryWatcher, types::FsOutData},
@@ -23,8 +20,6 @@ pub fn run_stream() -> eyre::Result<()> {
     loop {
         handle_incoming(out_rx.recv()??)?;
     }
-
-    Ok(())
 }
 
 fn handle_incoming(data: FsOutData) -> eyre::Result<()> {
