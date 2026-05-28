@@ -1,3 +1,3 @@
-mod directory;
+pub mod directory;
 mod file;
-mod types;
+pub mod types;

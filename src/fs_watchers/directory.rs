@@ -1,31 +1,27 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::mpsc
-};
+use std::{path::PathBuf, sync::mpsc};
 
 use inotify::{EventMask, Inotify, WatchMask};
-use notify::{Event, RecursiveMode, Result, Watcher};
 
 use crate::fs_watchers::types::{ActiveDirectory, FileTailState, HyperliquidDataDirKind};
 
 pub struct DirectoryWatcher {
     directory: ActiveDirectory,
-    notifier:  Inotify,
-    out_tx:    mpsc::Sender<OutData>
+    notifier: Inotify,
+    out_tx: mpsc::Sender<OutData>,
 }
 
 impl DirectoryWatcher {
     pub fn new(
         name: HyperliquidDataDirKind,
         dir_path: &PathBuf,
-        out_tx: mpsc::Sender<OutData>
+        out_tx: mpsc::Sender<OutData>,
     ) -> eyre::Result<Self> {
         let directory = ActiveDirectory::new(name, dir_path)?;
 
         let notifier = Inotify::init()?;
         notifier.watches().add(
             dir_path,
-            WatchMask::CREATE | WatchMask::MODIFY | WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO
+            WatchMask::CREATE | WatchMask::MODIFY | WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO,
         )?;
 
         Ok(Self { directory, notifier, out_tx })
@@ -68,9 +64,9 @@ impl DirectoryWatcher {
                     state.drain_new_bytes(|chunk| {
                         // Replace with your parser / channel / sink.
                         self.out_tx.send(OutData {
-                            bytes:     chunk.to_vec(),
-                            path:      path.display().to_string(),
-                            chunk_len: chunk.len()
+                            bytes: chunk.to_vec(),
+                            path: path.display().to_string(),
+                            chunk_len: chunk.len(),
                         })?;
                         Ok(())
                     })?;
@@ -80,16 +76,17 @@ impl DirectoryWatcher {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OutData {
-    bytes:     Vec<u8>,
-    path:      String,
-    chunk_len: usize
+    pub bytes: Vec<u8>,
+    pub path: String,
+    pub chunk_len: usize,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn test_directory_watcher() {
