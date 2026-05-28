@@ -14,7 +14,6 @@ pub const HYPERLIQUID_DATA_DIR: &str = "/var/lib/hyperliquid/hl/data";
 
 pub fn run_stream() -> eyre::Result<()> {
     let (out_tx, out_rx) = mpsc::channel();
-    let mut parse_buffers = HashMap::new();
 
     println!("initializing watcher");
     let watcher = DirectoryWatcher::new(HyperliquidDataDirKind::NodeFills, out_tx)?;
@@ -22,17 +21,14 @@ pub fn run_stream() -> eyre::Result<()> {
     watcher.run();
 
     loop {
-        handle_incoming(out_rx.recv()??, &mut parse_buffers)?;
+        handle_incoming(out_rx.recv()??)?;
     }
 }
 
-fn handle_incoming(
-    data: FsOutData,
-    parse_buffers: &mut HashMap<String, Vec<u8>>
-) -> eyre::Result<()> {
+fn handle_incoming(data: FsOutData) -> eyre::Result<()> {
     match data.name {
         HyperliquidDataDirKind::NodeFills => {
-            handle_node_fills_streaming(data, parse_buffers)?;
+            handle_node_fills_streaming(data)?;
         }
         _ => unreachable!()
     };
@@ -40,12 +36,9 @@ fn handle_incoming(
     Ok(())
 }
 
-fn handle_node_fills_streaming(
-    data: FsOutData,
-    parse_buffers: &mut HashMap<String, Vec<u8>>
-) -> eyre::Result<()> {
+fn handle_node_fills_streaming(data: FsOutData) -> eyre::Result<()> {
     let path = data.path;
-    let buffer = parse_buffers.entry(path.clone()).or_default();
+    let mut buffer = Vec::new();
     buffer.extend_from_slice(&data.bytes);
 
     let mut line_start = 0;
