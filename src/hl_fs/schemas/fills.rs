@@ -1,26 +1,26 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize)]
-pub struct NodeFillsStreamingRow {
+pub struct NodeFillsRow {
     pub local_time:   String,
     pub block_time:   String,
     pub block_number: u64,
-    pub events:       Vec<NodeFillsStreamingFill>
+    pub events:       Vec<NodeFillsFill>
 }
 
-impl<'de> Deserialize<'de> for NodeFillsStreamingRow {
+impl<'de> Deserialize<'de> for NodeFillsRow {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>
     {
-        let raw = _private::NodeFillsStreamingRowRaw::deserialize(deserializer)?;
+        let raw = _private::NodeFillsRowRaw::deserialize(deserializer)?;
 
         let events = raw
             .events
             .into_iter()
             .map(|raw_event| {
                 let (user, event) = (raw_event.0, raw_event.1);
-                Ok(NodeFillsStreamingFill {
+                Ok(NodeFillsFill {
                     user,
                     coin: event.coin,
                     px: event.px.parse().map_err(serde::de::Error::custom)?,
@@ -65,12 +65,12 @@ impl<'de> Deserialize<'de> for NodeFillsStreamingRow {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NodeFillsStreamingFill {
+pub struct NodeFillsFill {
     pub user:           String,
     pub coin:           String,
     pub px:             f64,
     pub sz:             f64,
-    pub side:           NodeFillsStreamingSide,
+    pub side:           NodeFillsSide,
     pub time:           u64,
     pub start_position: f64,
     pub dir:            String,
@@ -89,7 +89,7 @@ pub struct NodeFillsStreamingFill {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub enum NodeFillsStreamingSide {
+pub enum NodeFillsSide {
     A,
     B
 }
@@ -97,26 +97,26 @@ pub enum NodeFillsStreamingSide {
 mod _private {
     use serde::{Deserialize, Serialize};
 
-    use super::NodeFillsStreamingSide;
+    use super::NodeFillsSide;
 
     #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
-    pub struct NodeFillsStreamingRowRaw {
+    pub struct NodeFillsRowRaw {
         pub local_time:   String,
         pub block_time:   String,
         pub block_number: u64,
-        pub events:       Vec<NodeFillsStreamingEventRaw>
+        pub events:       Vec<NodeFillsEventRaw>
     }
 
     #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
-    pub struct NodeFillsStreamingEventRaw(pub String, pub NodeFillsStreamingFillRaw);
+    pub struct NodeFillsEventRaw(pub String, pub NodeFillsFillRaw);
 
     #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
-    pub struct NodeFillsStreamingFillRaw {
+    pub struct NodeFillsFillRaw {
         pub coin:           String,
         pub px:             String,
         pub sz:             String,
-        pub side:           NodeFillsStreamingSide,
+        pub side:           NodeFillsSide,
         pub time:           u64,
         pub start_position: String,
         pub dir:            String,

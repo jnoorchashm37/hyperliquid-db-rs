@@ -10,7 +10,7 @@ use crate::HYPERLIQUID_DATA_DIR;
 pub enum HyperliquidDataDirKind {
     ReplicaCmds,
     NodeSlowBlockTimes,
-    NodeFillsStreaming
+    NodeFills
 }
 
 impl HyperliquidDataDirKind {
@@ -19,7 +19,7 @@ impl HyperliquidDataDirKind {
         let ext_dir = match self {
             HyperliquidDataDirKind::ReplicaCmds => "replica_cmds",
             HyperliquidDataDirKind::NodeSlowBlockTimes => "node_slow_block_times",
-            HyperliquidDataDirKind::NodeFillsStreaming => "node_fills_streaming"
+            HyperliquidDataDirKind::NodeFills => "node_fills_streaming"
         };
 
         base_dir.join(ext_dir)
@@ -33,7 +33,7 @@ impl FromStr for HyperliquidDataDirKind {
         match s {
             "replica_cmds" => Ok(Self::ReplicaCmds),
             "node_slow_block_times" => Ok(Self::NodeSlowBlockTimes),
-            "node_fills_streaming" => Ok(Self::NodeFillsStreaming),
+            "node_fills_streaming" => Ok(Self::NodeFills),
             _ => Err(eyre::eyre!("invalid `HyperliquidDataDirKind`: {s}"))
         }
     }
@@ -44,7 +44,7 @@ impl fmt::Display for HyperliquidDataDirKind {
         let s = match self {
             HyperliquidDataDirKind::ReplicaCmds => "replica_cmds",
             HyperliquidDataDirKind::NodeSlowBlockTimes => "node_slow_block_times",
-            HyperliquidDataDirKind::NodeFillsStreaming => "node_fills_streaming"
+            HyperliquidDataDirKind::NodeFills => "node_fills_streaming"
         };
 
         fmt::Display::fmt(s, f)

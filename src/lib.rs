@@ -4,7 +4,7 @@ use eyre::WrapErr;
 
 use crate::{
     fs_handlers::{directory_watcher::DirectoryWatcher, types::FsOutData},
-    hl_fs::{HyperliquidDataDirKind, schemas::NodeFillsStreamingRow}
+    hl_fs::{HyperliquidDataDirKind, schemas::NodeFillsRow}
 };
 
 pub mod fs_handlers;
@@ -17,7 +17,7 @@ pub fn run_stream() -> eyre::Result<()> {
     let mut parse_buffers = HashMap::new();
 
     println!("initializing watcher");
-    let watcher = DirectoryWatcher::new(HyperliquidDataDirKind::NodeFillsStreaming, out_tx)?;
+    let watcher = DirectoryWatcher::new(HyperliquidDataDirKind::NodeFills, out_tx)?;
     println!("initialized watcher");
     watcher.run();
 
@@ -31,7 +31,7 @@ fn handle_incoming(
     parse_buffers: &mut HashMap<String, Vec<u8>>
 ) -> eyre::Result<()> {
     match data.name {
-        HyperliquidDataDirKind::NodeFillsStreaming => {
+        HyperliquidDataDirKind::NodeFills => {
             handle_node_fills_streaming(data, parse_buffers)?;
         }
         _ => unreachable!()
@@ -73,7 +73,7 @@ fn parse_node_fills_streaming_row(path: &str, line: &[u8]) -> eyre::Result<()> {
         return Ok(());
     }
 
-    let value = serde_json::from_slice::<NodeFillsStreamingRow>(line)
+    let value = serde_json::from_slice::<NodeFillsRow>(line)
         .wrap_err_with(|| format!("failed to parse node_fills_streaming row from {path}"))?;
     println!("{value:?}");
 
