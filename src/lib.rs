@@ -15,7 +15,9 @@ pub const HYPERLIQUID_DATA_DIR: &str = "/var/lib/hyperliquid/hl/data";
 
 pub fn run_stream() -> eyre::Result<()> {
     let (out_tx, out_rx) = mpsc::channel();
+    println!("initializing watcher");
     let watcher = DirectoryWatcher::new(HyperliquidDataDirKind::NodeFillsStreaming, out_tx)?;
+    println!("initialized watcher");
     watcher.run();
 
     loop {
