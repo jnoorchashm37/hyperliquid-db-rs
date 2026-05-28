@@ -13,7 +13,7 @@ use std::{
 
 use hyperliquid_db::fs_watchers::{directory::OutData, types::HyperliquidDataDirKind};
 
-const BENCHMARK_DIRECTORY: &str = "/var/lib/hyperliquid/hl/data/replica_cmds";
+const BENCHMARK_DIRECTORY: &str = "/var/lib/hyperliquid/hl/data/node_slow_block_times";
 const BENCHMARK_RUNS: usize = 10;
 const BENCHMARK_CHUNKS: usize = 1_000;
 const BENCHMARK_CHUNK_BYTES: usize = 1_024;

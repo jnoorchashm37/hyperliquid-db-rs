@@ -23,7 +23,8 @@ impl ActiveDirectory {
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub enum HyperliquidDataDirKind {
-    ReplicaCmds
+    ReplicaCmds,
+    NodeSlowBlockTimes
 }
 
 impl FromStr for HyperliquidDataDirKind {
@@ -32,6 +33,7 @@ impl FromStr for HyperliquidDataDirKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "replica_cmds" => Ok(Self::ReplicaCmds),
+            "node_slow_block_times" => Ok(Self::NodeSlowBlockTimes),
             _ => Err(eyre::eyre!("invalid `HyperliquidDataDirKind`: {s}"))
         }
     }
@@ -40,7 +42,8 @@ impl FromStr for HyperliquidDataDirKind {
 impl fmt::Display for HyperliquidDataDirKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            HyperliquidDataDirKind::ReplicaCmds => "replica_cmds"
+            HyperliquidDataDirKind::ReplicaCmds => "replica_cmds",
+            HyperliquidDataDirKind::NodeSlowBlockTimes => "node_slow_block_times"
         };
 
         fmt::Display::fmt(s, f)
