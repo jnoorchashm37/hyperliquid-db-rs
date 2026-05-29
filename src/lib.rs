@@ -27,6 +27,7 @@ pub fn run_stream() -> eyre::Result<()> {
     watcher.run();
 
     let mut deriver = TradeDeriver::new();
+    tracing::info!("TradeDeriver watcher");
     loop {
         let data = out_rx.recv()??;
 
