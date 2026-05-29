@@ -129,6 +129,7 @@ struct StageSamples {
     block_time_to_row_local:       Vec<f64>,
     row_local_to_notification:     Vec<f64>,
     notification_to_drain_file:    Vec<f64>,
+    drain_file:                    Vec<f64>,
     drain_file_to_drain_new_bytes: Vec<f64>,
     drain_new_bytes:               Vec<f64>,
     notification_to_file_bytes:    Vec<f64>,
@@ -148,6 +149,7 @@ impl StageSamples {
             .append(&mut other.row_local_to_notification);
         self.notification_to_drain_file
             .append(&mut other.notification_to_drain_file);
+        self.drain_file.append(&mut other.drain_file);
         self.drain_file_to_drain_new_bytes
             .append(&mut other.drain_file_to_drain_new_bytes);
         self.drain_new_bytes.append(&mut other.drain_new_bytes);
@@ -294,6 +296,9 @@ fn chunk_pipeline_stages(chunk: &FsOutData, channel_received_at_ns: u128) -> Sta
         pipeline.notification_batch_received_at_ns
     ));
     stages
+        .drain_file
+        .push(delta_ms(pipeline.drain_file_finished_at_ns, pipeline.drain_file_started_at_ns));
+    stages
         .drain_file_to_drain_new_bytes
         .push(delta_ms(pipeline.drain_new_bytes_started_at_ns, pipeline.drain_file_started_at_ns));
     stages.drain_new_bytes.push(delta_ms(
@@ -350,7 +355,7 @@ impl NodeFillsRowProfiler {
     }
 
     fn profile_row(&mut self, line: &[u8], chunk: &FsOutData) -> eyre::Result<StageSamples> {
-        let row: NodeFillsRow = serde_json::from_slice(line).wrap_err_with(|| {
+        let row = TradeDeriver::parse_raw_type(line).wrap_err_with(|| {
             format!("failed to parse node_fills_streaming row from {}", chunk.path)
         })?;
         let parsed_at_ns = unix_timestamp_ns();
@@ -572,12 +577,13 @@ impl Summary {
         }
     }
 
-    fn stage_rows(&self) -> [(&'static str, StageSummary); 11] {
+    fn stage_rows(&self) -> [(&'static str, StageSummary); 12] {
         [
             ("trade time -> row local_time", self.stages.trade_time_to_row_local),
             ("block_time -> row local_time", self.stages.block_time_to_row_local),
             ("row local_time -> notify", self.stages.row_local_to_notification),
             ("notify -> drain_file", self.stages.notification_to_drain_file),
+            ("drain_file duration", self.stages.drain_file),
             ("drain_file -> drain_new_bytes", self.stages.drain_file_to_drain_new_bytes),
             ("drain_new_bytes duration", self.stages.drain_new_bytes),
             ("notify -> file bytes read", self.stages.notification_to_file_bytes),
@@ -618,6 +624,7 @@ struct StageSummaries {
     block_time_to_row_local:       StageSummary,
     row_local_to_notification:     StageSummary,
     notification_to_drain_file:    StageSummary,
+    drain_file:                    StageSummary,
     drain_file_to_drain_new_bytes: StageSummary,
     drain_new_bytes:               StageSummary,
     notification_to_file_bytes:    StageSummary,
@@ -643,6 +650,7 @@ impl StageSummaries {
             stages
                 .notification_to_drain_file
                 .extend(&sample.stages.notification_to_drain_file);
+            stages.drain_file.extend(&sample.stages.drain_file);
             stages
                 .drain_file_to_drain_new_bytes
                 .extend(&sample.stages.drain_file_to_drain_new_bytes);
@@ -671,6 +679,7 @@ impl StageSummaries {
             block_time_to_row_local:       StageSummary::new(&stages.block_time_to_row_local),
             row_local_to_notification:     StageSummary::new(&stages.row_local_to_notification),
             notification_to_drain_file:    StageSummary::new(&stages.notification_to_drain_file),
+            drain_file:                    StageSummary::new(&stages.drain_file),
             drain_file_to_drain_new_bytes: StageSummary::new(&stages.drain_file_to_drain_new_bytes),
             drain_new_bytes:               StageSummary::new(&stages.drain_new_bytes),
             notification_to_file_bytes:    StageSummary::new(&stages.notification_to_file_bytes),
