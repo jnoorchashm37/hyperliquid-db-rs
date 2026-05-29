@@ -290,5 +290,25 @@ impl TradeTimeComparionMetrics {
             "avg lag delta ({} - {}): {:.3} ms",
             self.cache0, self.cache1, self.avg_diff_latency_lag_ms
         );
+        println!();
+        println!("{:<18} {:>35} {:>35}", "stream", "rx time range ms", "trade time range ms");
+        println!(
+            "{:<18} {:>35} {:>35}",
+            self.cache0,
+            format!("{} - {}", self.min_max_first_rx_time0_ms.0, self.min_max_first_rx_time0_ms.1),
+            format!(
+                "{} - {}",
+                self.min_max_first_trade_time0_ms.0, self.min_max_first_trade_time0_ms.1
+            )
+        );
+        println!(
+            "{:<18} {:>35} {:>35}",
+            self.cache1,
+            format!("{} - {}", self.min_max_first_rx_time1_ms.0, self.min_max_first_rx_time1_ms.1),
+            format!(
+                "{} - {}",
+                self.min_max_first_trade_time1_ms.0, self.min_max_first_trade_time1_ms.1
+            )
+        );
     }
 }
