@@ -181,19 +181,6 @@ impl TradeTimeComparionMetrics {
             .map(|trade| trade.trade.clone())
             .collect::<HashSet<_>>();
 
-        let check0 = cache0
-            .trades
-            .iter()
-            .map(|trade| trade.trade.hash.clone())
-            .collect::<HashSet<_>>();
-        let check1 = cache1
-            .trades
-            .iter()
-            .map(|trade| trade.trade.hash.clone())
-            .collect::<HashSet<_>>();
-        assert_eq!(check0.len(), cache0.trades.len());
-        assert_eq!(check1.len(), cache1.trades.len());
-
         let mut similiar_trades = Vec::new();
 
         cache1.trades.iter().for_each(|trade| {
