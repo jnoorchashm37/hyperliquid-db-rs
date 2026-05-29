@@ -189,9 +189,9 @@ impl TradeTimeComparionMetrics {
                 ),
                  (trade0, trade1)| {
                     let latency_lag0_ms =
-                        (trade0.rx_timestamp_ms - trade0.trade.time as u128) as f64;
+                        (trade0.rx_timestamp_ms as f64 - trade0.trade.time as f64) as f64;
                     let latency_lag1_ms =
-                        (trade1.rx_timestamp_ms - trade1.trade.time as u128) as f64;
+                        (trade1.rx_timestamp_ms as f64 - trade1.trade.time as f64) as f64;
                     let diff_latency_lag_ms = latency_lag0_ms - latency_lag1_ms;
 
                     avg_latency_lag0_ms += latency_lag0_ms / similiar_trades_len as f64;
