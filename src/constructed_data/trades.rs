@@ -73,7 +73,6 @@ impl HyperliquidDataDeriver for TradeDeriver {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
 
     use super::*;
     use crate::{

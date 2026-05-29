@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    ffi::OsStr,
     fs,
     path::{Path, PathBuf},
     sync::mpsc
@@ -9,13 +8,10 @@ use std::{
 use inotify::{EventMask, Inotify, WatchDescriptor, WatchMask};
 
 use crate::{
-    fs_handlers::types::{
-        ActiveDirectory, FileTailState, FsOutData, FsPipelineTimestamps, unix_timestamp_ns
-    },
-    hl_fs::HyperliquidDataDirKind
+    fs_handlers::types::{ActiveDirectory, FileTailState, FsOutData, FsPipelineTimestamps},
+    hl_fs::HyperliquidDataDirKind,
+    utils::{NS_PER_MS, unix_timestamp}
 };
-
-const NS_PER_MS: u128 = 1_000_000;
 
 pub struct DirectoryWatcher {
     directory:  ActiveDirectory,
@@ -32,7 +28,7 @@ impl DirectoryWatcher {
         let directory = ActiveDirectory::new(name)?;
         let notifier = Inotify::init()?;
         let mut watcher = Self { directory, notifier, watch_dirs: HashMap::new(), out_tx };
-        watcher.add_directory_watches()?;
+        watcher.add_directory_watches_recursive(&watcher.directory.dir_path.clone())?;
 
         Ok(watcher)
     }
@@ -51,7 +47,7 @@ impl DirectoryWatcher {
 
         loop {
             let events = self.notifier.read_events_blocking(&mut event_buf)?;
-            let notification_batch_received_at_ns = unix_timestamp_ns();
+            let notification_batch_received_at_ms = unix_timestamp().as_millis();
             for event in events {
                 if event.mask.contains(EventMask::Q_OVERFLOW) {
                     // Production code: full rescan here.
@@ -64,7 +60,14 @@ impl DirectoryWatcher {
                     continue;
                 }
 
-                let Some(path) = self.event_path(&event.wd, event.name) else {
+                let Some(path) = self
+                    .watch_dirs
+                    .get(&event.wd)
+                    .map(|dir_path| match event.name {
+                        Some(name) => dir_path.join(name),
+                        None => dir_path.clone()
+                    })
+                else {
                     continue;
                 };
 
@@ -73,27 +76,14 @@ impl DirectoryWatcher {
                         || event.mask.contains(EventMask::MOVED_TO)
                     {
                         self.add_directory_watches_recursive(&path)?;
-                        self.drain_new_files_recursive(&path, notification_batch_received_at_ns)?;
+                        self.drain_new_files_recursive(&path, notification_batch_received_at_ms)?;
                     }
                     continue;
                 }
 
-                self.drain_file(&path, notification_batch_received_at_ns)?;
+                self.drain_file(&path, notification_batch_received_at_ms)?;
             }
         }
-    }
-
-    fn event_path(&self, wd: &WatchDescriptor, name: Option<&OsStr>) -> Option<PathBuf> {
-        let dir_path = self.watch_dirs.get(wd)?;
-        Some(match name {
-            Some(name) => dir_path.join(name),
-            None => dir_path.clone()
-        })
-    }
-
-    fn add_directory_watches(&mut self) -> eyre::Result<()> {
-        let dir_path = self.directory.dir_path.clone();
-        self.add_directory_watches_recursive(&dir_path)
     }
 
     fn add_directory_watches_recursive(&mut self, dir_path: &Path) -> eyre::Result<()> {
@@ -101,7 +91,8 @@ impl DirectoryWatcher {
             return Ok(());
         }
 
-        self.watch_directory(dir_path)?;
+        let wd = self.notifier.watches().add(dir_path, Self::watch_mask())?;
+        self.watch_dirs.insert(wd, dir_path.to_path_buf());
 
         for entry in fs::read_dir(dir_path)? {
             let entry = entry?;
@@ -109,13 +100,6 @@ impl DirectoryWatcher {
                 self.add_directory_watches_recursive(&entry.path())?;
             }
         }
-
-        Ok(())
-    }
-
-    fn watch_directory(&mut self, dir_path: &Path) -> eyre::Result<()> {
-        let wd = self.notifier.watches().add(dir_path, Self::watch_mask())?;
-        self.watch_dirs.insert(wd, dir_path.to_path_buf());
 
         Ok(())
     }
@@ -132,7 +116,7 @@ impl DirectoryWatcher {
     fn drain_new_files_recursive(
         &mut self,
         dir_path: &Path,
-        notification_batch_received_at_ns: u128
+        notification_batch_received_at_ms: u128
     ) -> eyre::Result<()> {
         if !dir_path.is_dir() {
             return Ok(());
@@ -144,9 +128,9 @@ impl DirectoryWatcher {
             let file_type = entry.file_type()?;
 
             if file_type.is_dir() {
-                self.drain_new_files_recursive(&path, notification_batch_received_at_ns)?;
+                self.drain_new_files_recursive(&path, notification_batch_received_at_ms)?;
             } else if file_type.is_file() {
-                self.drain_file(&path, notification_batch_received_at_ns)?;
+                self.drain_file(&path, notification_batch_received_at_ms)?;
             }
         }
 
@@ -156,9 +140,9 @@ impl DirectoryWatcher {
     fn drain_file(
         &mut self,
         path: &Path,
-        notification_batch_received_at_ns: u128
+        notification_batch_received_at_ms: u128
     ) -> eyre::Result<()> {
-        let drain_file_started_at_ns = unix_timestamp_ns();
+        let drain_file_started_at_ns = unix_timestamp().as_nanos();
         if !path.is_file() {
             return Ok(());
         }
@@ -174,30 +158,31 @@ impl DirectoryWatcher {
             let out_tx = self.out_tx.clone();
             let name = self.directory.name;
             let path = path.display().to_string();
-            let drain_new_bytes_started_at_ns = unix_timestamp_ns();
+            let drain_new_bytes_started_at_ns = unix_timestamp().as_nanos();
             let mut chunks = Vec::new();
 
             state.drain_new_bytes(|chunk| {
                 chunks.push(PendingFsChunk {
                     bytes:                 chunk.to_vec(),
                     chunk_len:             chunk.len(),
-                    file_bytes_read_at_ns: unix_timestamp_ns()
+                    file_bytes_read_at_ns: unix_timestamp().as_nanos()
                 });
                 Ok(())
             })?;
-            let drain_new_bytes_finished_at_ns = unix_timestamp_ns();
-            let drain_file_finished_at_ns = unix_timestamp_ns();
+            let drain_new_bytes_finished_at_ns = unix_timestamp().as_nanos();
+            let drain_file_finished_at_ns = unix_timestamp().as_nanos();
 
             for chunk in chunks {
-                let channel_send_started_at_ns = unix_timestamp_ns();
+                let channel_send_started_at_ns = unix_timestamp().as_nanos();
                 out_tx.send(Ok(FsOutData {
                     name,
                     bytes: chunk.bytes,
                     path: path.clone(),
                     chunk_len: chunk.chunk_len,
-                    notification_received_at_ms: notification_batch_received_at_ns / NS_PER_MS,
+                    notification_received_at_ms: notification_batch_received_at_ms,
                     pipeline: FsPipelineTimestamps {
-                        notification_batch_received_at_ns,
+                        notification_batch_received_at_ns: notification_batch_received_at_ms
+                            * NS_PER_MS,
                         drain_file_started_at_ns,
                         drain_new_bytes_started_at_ns,
                         file_bytes_read_at_ns: chunk.file_bytes_read_at_ns,

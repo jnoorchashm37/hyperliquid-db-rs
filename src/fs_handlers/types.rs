@@ -2,8 +2,7 @@ use std::{
     collections::HashMap,
     fs,
     os::unix::fs::FileExt,
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH}
+    path::{Path, PathBuf}
 };
 
 use crate::hl_fs::HyperliquidDataDirKind;
@@ -99,11 +98,4 @@ pub struct FsPipelineTimestamps {
     pub drain_new_bytes_finished_at_ns:    u128,
     pub drain_file_finished_at_ns:         u128,
     pub channel_send_started_at_ns:        u128
-}
-
-pub fn unix_timestamp_ns() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock is before Unix epoch")
-        .as_nanos()
 }

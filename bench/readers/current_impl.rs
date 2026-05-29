@@ -1,7 +1,7 @@
 use std::{path::Path, sync::mpsc, thread};
 
 use hyperliquid_db::{
-    fs_handlers::{directory_watcher::DirectoryWatcher, types::FsOutData},
+    fs_handlers::{DirectoryWatcher, types::FsOutData},
     hl_fs::HyperliquidDataDirKind
 };
 

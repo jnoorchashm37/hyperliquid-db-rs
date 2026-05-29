@@ -7,12 +7,11 @@ use std::{
 };
 
 use hyperliquid_db::{
-    fs_handlers::types::{FsOutData, FsPipelineTimestamps, unix_timestamp_ns},
-    hl_fs::HyperliquidDataDirKind
+    fs_handlers::types::{FsOutData, FsPipelineTimestamps},
+    hl_fs::HyperliquidDataDirKind,
+    utils::{NS_PER_MS, unix_timestamp}
 };
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
-
-const NS_PER_MS: u128 = 1_000_000;
 
 pub fn spawn_file_reader(
     name: HyperliquidDataDirKind,
@@ -25,7 +24,7 @@ pub fn spawn_file_reader(
     let mut watcher = notify::recommended_watcher(move |res| {
         let _ = fs_event_tx.send(TimedFsEvent {
             event: res,
-            notification_batch_received_at_ns: unix_timestamp_ns()
+            notification_batch_received_at_ns: unix_timestamp().as_nanos()
         });
     })?;
     watcher.watch(&directory, RecursiveMode::Recursive)?;
@@ -114,15 +113,15 @@ impl ExistingFsReader {
     }
 
     fn flush_current_file(&mut self, notification_batch_received_at_ns: u128) -> eyre::Result<()> {
-        let drain_file_started_at_ns = unix_timestamp_ns();
+        let drain_file_started_at_ns = unix_timestamp().as_nanos();
         let Some(file) = self.current_file.as_mut() else {
             return Ok(());
         };
 
         let mut data = String::new();
-        let drain_new_bytes_started_at_ns = unix_timestamp_ns();
+        let drain_new_bytes_started_at_ns = unix_timestamp().as_nanos();
         file.read_to_string(&mut data)?;
-        let file_bytes_read_at_ns = unix_timestamp_ns();
+        let file_bytes_read_at_ns = unix_timestamp().as_nanos();
         let drain_new_bytes_finished_at_ns = file_bytes_read_at_ns;
         if data.is_empty() {
             return Ok(());
@@ -133,8 +132,8 @@ impl ExistingFsReader {
             .as_ref()
             .map_or_else(String::new, |path| path.display().to_string());
         let chunk_len = data.len();
-        let drain_file_finished_at_ns = unix_timestamp_ns();
-        let channel_send_started_at_ns = unix_timestamp_ns();
+        let drain_file_finished_at_ns = unix_timestamp().as_nanos();
+        let channel_send_started_at_ns = unix_timestamp().as_nanos();
 
         self.out_tx.send(Ok(FsOutData {
             name: self.name,

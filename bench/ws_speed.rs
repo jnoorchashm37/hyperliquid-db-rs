@@ -4,7 +4,7 @@ fn main() {
     eprintln!("Run this benchmark on Linux with: cargo bench --bench ws_speed");
 }
 
-// #[cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
 mod ws_streams;
 
 #[cfg(target_os = "linux")]

@@ -1,4 +1,4 @@
-// #![cfg(target_os = "linux")]
+#![cfg(target_os = "linux")]
 
 mod current_impl;
 mod existing_fs_reader;
@@ -15,8 +15,9 @@ use eyre::WrapErr;
 use hyperliquid_db::{
     HYPERLIQUID_DATA_DIR,
     constructed_data::{HyperliquidDataDeriver, TradeDeriver},
-    fs_handlers::types::{FsOutData, unix_timestamp_ns},
-    hl_fs::HyperliquidDataDirKind
+    fs_handlers::types::FsOutData,
+    hl_fs::HyperliquidDataDirKind,
+    utils::{NS_PER_MS, NS_PER_SEC, unix_timestamp}
 };
 
 const BENCHMARK_RUNS: usize = 10;
@@ -24,8 +25,6 @@ const BENCHMARK_CHUNKS: usize = 100;
 const BENCHMARK_CHUNK_BYTES: usize = 256;
 const BENCHMARK_READY_MS: u64 = 100;
 const BENCHMARK_RECV_TIMEOUT_MS: u64 = 100_000;
-const NS_PER_MS: u128 = 1_000_000;
-const NS_PER_SEC: u128 = 1_000_000_000;
 
 type SpawnReader =
     fn(HyperliquidDataDirKind, &Path) -> eyre::Result<mpsc::Receiver<eyre::Result<FsOutData>>>;
@@ -276,7 +275,7 @@ fn recv_target_bytes(
             }
         };
 
-        let channel_received_at_ns = unix_timestamp_ns();
+        let channel_received_at_ns = unix_timestamp().as_nanos();
         stages.append(chunk_pipeline_stages(&chunk, channel_received_at_ns));
         stages.append(row_profiler.profile_chunk(&chunk)?);
 
@@ -358,14 +357,14 @@ impl NodeFillsRowProfiler {
         let row = TradeDeriver::parse_raw_type(line).wrap_err_with(|| {
             format!("failed to parse node_fills_streaming row from {}", chunk.path)
         })?;
-        let parsed_at_ns = unix_timestamp_ns();
+        let parsed_at_ns = unix_timestamp().as_nanos();
         let local_time_ns = parse_node_timestamp_ns(&row.local_time)
             .wrap_err_with(|| format!("failed to parse local_time {}", row.local_time))?;
         let block_time_ns = parse_node_timestamp_ns(&row.block_time)
             .wrap_err_with(|| format!("failed to parse block_time {}", row.block_time))?;
 
         let trades = self.deriver.construct_data(row)?;
-        let derived_at_ns = unix_timestamp_ns();
+        let derived_at_ns = unix_timestamp().as_nanos();
 
         let mut stages = StageSamples::default();
         stages

@@ -1,12 +1,12 @@
-use std::{collections::HashMap, sync::mpsc};
+use std::sync::mpsc;
 
-use eyre::WrapErr;
 pub mod constructed_data;
+pub mod utils;
 
 use crate::{
     constructed_data::{HyperliquidDataDeriver, TradeDeriver},
-    fs_handlers::{directory_watcher::DirectoryWatcher, types::FsOutData},
-    hl_fs::{HyperliquidDataDirKind, schemas::NodeFillsRow}
+    fs_handlers::DirectoryWatcher,
+    hl_fs::HyperliquidDataDirKind
 };
 
 pub mod fs_handlers;
