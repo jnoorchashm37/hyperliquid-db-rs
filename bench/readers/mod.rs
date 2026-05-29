@@ -16,7 +16,7 @@ use hyperliquid_db::{
     HYPERLIQUID_DATA_DIR,
     constructed_data::{HyperliquidDataDeriver, TradeDeriver},
     fs_handlers::types::{FsOutData, unix_timestamp_ns},
-    hl_fs::{HyperliquidDataDirKind, schemas::NodeFillsRow}
+    hl_fs::HyperliquidDataDirKind
 };
 
 const BENCHMARK_RUNS: usize = 10;

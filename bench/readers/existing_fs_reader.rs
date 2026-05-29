@@ -15,10 +15,10 @@ use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 const NS_PER_MS: u128 = 1_000_000;
 
 pub fn spawn_file_reader(
-    _name: HyperliquidDataDirKind,
+    name: HyperliquidDataDirKind,
     dir_path: &Path
 ) -> eyre::Result<mpsc::Receiver<eyre::Result<FsOutData>>> {
-    let directory = dir_path.canonicalize()?;
+    let directory = dir_path.join(name.to_string()).canonicalize()?;
     let (out_tx, out_rx) = mpsc::channel();
     let (fs_event_tx, fs_event_rx) = mpsc::channel();
 
@@ -30,7 +30,7 @@ pub fn spawn_file_reader(
     })?;
     watcher.watch(&directory, RecursiveMode::Recursive)?;
 
-    let mut reader = ExistingFsReader { current_file: None, current_path: None, out_tx };
+    let mut reader = ExistingFsReader { name, current_file: None, current_path: None, out_tx };
 
     thread::spawn(move || {
         if let Err(err) = reader.run(fs_event_rx, watcher) {
@@ -42,6 +42,7 @@ pub fn spawn_file_reader(
 }
 
 struct ExistingFsReader {
+    name:         HyperliquidDataDirKind,
     current_file: Option<File>,
     current_path: Option<PathBuf>,
     out_tx:       mpsc::Sender<eyre::Result<FsOutData>>
@@ -136,7 +137,7 @@ impl ExistingFsReader {
         let channel_send_started_at_ns = unix_timestamp_ns();
 
         self.out_tx.send(Ok(FsOutData {
-            name: HyperliquidDataDirKind::NodeSlowBlockTimes,
+            name: self.name,
             bytes: data.into_bytes(),
             path,
             chunk_len,
