@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::mpsc};
 
 use eyre::WrapErr;
+pub mod trades;
 
 use crate::{
     fs_handlers::{directory_watcher::DirectoryWatcher, types::FsOutData},
