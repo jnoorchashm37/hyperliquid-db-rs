@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::ErrorKind,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -181,11 +181,24 @@ impl TradeTimeComparionMetrics {
             .map(|trade| ((trade.trade.hash.clone(), trade.trade.users.clone()), trade.clone()))
             .collect::<HashMap<_, _>>();
 
+        let check0 = cache0
+            .trades
+            .iter()
+            .map(|trade| trade.trade.hash.clone())
+            .collect::<HashSet<_>>();
+        let check1 = cache1
+            .trades
+            .iter()
+            .map(|trade| trade.trade.hash.clone())
+            .collect::<HashSet<_>>();
+        assert_eq!(check0.len(), cache0.trades.len());
+        assert_eq!(check1.len(), cache1.trades.len());
+
         let mut similiar_trades = Vec::new();
 
         cache1.trades.iter().for_each(|trade| {
             if let Some(cach0_trade) =
-                cache0_trades_by_key.remove(&(trade.trade.hash.clone(), trade.trade.users.clone()))
+                cache0_trades_by_key.get(&(trade.trade.hash.clone(), trade.trade.users.clone()))
             {
                 assert_eq!(trade.trade, cach0_trade.trade);
                 similiar_trades.push((cach0_trade.clone(), trade.clone()));
@@ -229,6 +242,22 @@ impl TradeTimeComparionMetrics {
     }
 
     fn pretty_print(&self) {
-        println!("{self:?}")
+        let comparable_trades = self.trades0.min(self.trades1);
+        let match_rate = if comparable_trades == 0 {
+            0.0
+        } else {
+            (self.total_similiar_trades as f64 / comparable_trades as f64) * 100.0
+        };
+
+        println!("trade websocket latency comparison");
+        println!("{:<18} {:>12} {:>16}", "stream", "trades", "avg lag ms");
+        println!("{:<18} {:>12} {:>16.3}", self.cache0, self.trades0, self.avg_latency_lag0_ms);
+        println!("{:<18} {:>12} {:>16.3}", self.cache1, self.trades1, self.avg_latency_lag1_ms);
+        println!();
+        println!("matched trades: {} ({match_rate:.2}%)", self.total_similiar_trades);
+        println!(
+            "avg lag delta ({} - {}): {:.3} ms",
+            self.cache0, self.cache1, self.avg_diff_latency_lag_ms
+        );
     }
 }
