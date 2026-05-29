@@ -18,9 +18,9 @@ pub fn run_stream() -> eyre::Result<()> {
     crate::utils::init_logging();
     let (out_tx, out_rx) = mpsc::channel();
 
-    println!("initializing watcher");
+    tracing::info!("initializing watcher");
     let watcher = DirectoryWatcher::new(HyperliquidDataDirKind::NodeFills, out_tx)?;
-    println!("initialized watcher");
+    tracing::info!("initialized watcher");
     watcher.run();
 
     let mut deriver = TradeDeriver::new();
@@ -31,6 +31,6 @@ pub fn run_stream() -> eyre::Result<()> {
             HyperliquidDataDirKind::NodeFills => deriver.handle_raw_data(data)?,
             _ => unreachable!()
         };
-        println!("{out:?}");
+        tracing::info!("{out:?}");
     }
 }

@@ -41,7 +41,7 @@ impl TradeDeriver {
             .remove(&tid)
             .expect("pending trade exists");
         let trade = pending_trade.into_trade()?;
-        // println!("{}", serde_json::to_string(&trade)?);
+        tracing::debug!(?trade, "found new trade");
 
         Ok(Some(trade))
     }

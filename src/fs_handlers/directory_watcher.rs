@@ -36,7 +36,7 @@ impl DirectoryWatcher {
     pub fn run(mut self) {
         std::thread::spawn(move || {
             if let Err(error) = self.run_safe() {
-                eprintln!("error running filesystem watcher: {error:?}");
+                tracing::error!("error running filesystem watcher: {error:?}");
                 self.out_tx.send(Err(error)).unwrap();
             }
         });
