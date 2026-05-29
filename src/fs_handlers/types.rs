@@ -82,9 +82,9 @@ impl FileTailState {
 
 #[derive(Debug, Clone)]
 pub struct FsOutData {
-    pub name:                     HyperliquidDataDirKind,
-    pub bytes:                    Vec<u8>,
-    pub path:                     String,
-    pub chunk_len:                usize,
-    pub notification_received_at: Instant
+    pub name: HyperliquidDataDirKind,
+    pub bytes: Vec<u8>,
+    pub path: String,
+    pub chunk_len: usize,
+    pub notification_received_at_ms: u128
 }

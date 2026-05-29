@@ -186,7 +186,10 @@ mod tests {
             bytes,
             path: "test-node-fills".to_string(),
             chunk_len,
-            notification_received_at: Instant::now()
+            notification_received_at_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
         }
     }
 }

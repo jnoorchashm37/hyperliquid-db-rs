@@ -48,7 +48,10 @@ impl DirectoryWatcher {
 
         loop {
             let events = self.notifier.read_events_blocking(&mut event_buf)?;
-            let notification_received_at = Instant::now();
+            let notification_received_at_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
             for event in events {
                 if event.mask.contains(EventMask::Q_OVERFLOW) {
                     // Production code: full rescan here.
@@ -70,12 +73,12 @@ impl DirectoryWatcher {
                         || event.mask.contains(EventMask::MOVED_TO)
                     {
                         self.add_directory_watches_recursive(&path)?;
-                        self.drain_new_files_recursive(&path, notification_received_at)?;
+                        self.drain_new_files_recursive(&path, notification_received_at_ms)?;
                     }
                     continue;
                 }
 
-                self.drain_file(&path, notification_received_at)?;
+                self.drain_file(&path, notification_received_at_ms)?;
             }
         }
     }
@@ -129,7 +132,7 @@ impl DirectoryWatcher {
     fn drain_new_files_recursive(
         &mut self,
         dir_path: &Path,
-        notification_received_at: Instant
+        notification_received_at_ms: u128
     ) -> eyre::Result<()> {
         if !dir_path.is_dir() {
             return Ok(());
@@ -141,16 +144,16 @@ impl DirectoryWatcher {
             let file_type = entry.file_type()?;
 
             if file_type.is_dir() {
-                self.drain_new_files_recursive(&path, notification_received_at)?;
+                self.drain_new_files_recursive(&path, notification_received_at_ms)?;
             } else if file_type.is_file() {
-                self.drain_file(&path, notification_received_at)?;
+                self.drain_file(&path, notification_received_at_ms)?;
             }
         }
 
         Ok(())
     }
 
-    fn drain_file(&mut self, path: &Path, notification_received_at: Instant) -> eyre::Result<()> {
+    fn drain_file(&mut self, path: &Path, notification_received_at_ms: u128) -> eyre::Result<()> {
         if !path.is_file() {
             return Ok(());
         }
@@ -173,7 +176,7 @@ impl DirectoryWatcher {
                     bytes: chunk.to_vec(),
                     path: path.clone(),
                     chunk_len: chunk.len(),
-                    notification_received_at
+                    notification_received_at_ms
                 }))?;
                 Ok(())
             })?;
