@@ -3,6 +3,8 @@ use std::sync::mpsc;
 pub mod constructed_data;
 pub mod utils;
 
+use tracing::Level;
+
 use crate::{
     constructed_data::{HyperliquidDataDeriver, TradeDeriver},
     fs_handlers::DirectoryWatcher,
@@ -15,7 +17,8 @@ pub mod hl_fs;
 pub const HYPERLIQUID_DATA_DIR: &str = "/var/lib/hyperliquid/hl/data";
 
 pub fn run_stream() -> eyre::Result<()> {
-    crate::utils::init_logging();
+    crate::utils::init_logging(Level::DEBUG);
+
     let (out_tx, out_rx) = mpsc::channel();
 
     tracing::info!("initializing watcher");

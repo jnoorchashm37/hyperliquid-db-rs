@@ -1,6 +1,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tracing_subscriber::EnvFilter;
+use tracing::Level;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 pub const NS_PER_MS: u128 = 1_000_000;
 pub const NS_PER_SEC: u128 = 1_000_000_000;
@@ -11,16 +12,16 @@ pub fn unix_timestamp() -> Duration {
         .expect("system clock is before Unix epoch")
 }
 
-/// Installs a compact tracing subscriber for command-line progress logs.
-pub fn init_logging() {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("hyperliquid_db=debug"));
+pub fn init_logging(level: Level) {
+    let format = tracing_subscriber::fmt::layer()
+        .with_ansi(true)
+        .with_target(true);
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .without_time()
-        .with_level(false)
-        .with_target(true)
-        .with_writer(std::io::stderr)
-        .init();
+    let filter = tracing_subscriber::filter::Targets::new().with_target("hyperliquid_db", level);
+
+    let _ = tracing_subscriber::registry()
+        .with(format)
+        .with(filter)
+        .try_init()
+        .ok();
 }
