@@ -21,8 +21,6 @@ use crate::ws_streams::utils::{
 
 const TIMEOUT_SECS: u64 = 180;
 const PUBLIC_WS_READ_TIMEOUT_MS: u64 = 100;
-const IMPLEMENTED_STREAM_RECV_TIMEOUT_MS: u64 = 100;
-const TRADES_COIN_ENV: &str = "HL_WS_TRADES_COIN";
 const TRADES_COIN: &str = "BTC";
 static IS_RUNNING: AtomicBool = AtomicBool::new(true);
 
@@ -136,8 +134,10 @@ impl TradeCache {
     fn new_trades(&mut self, trades: Vec<Trade>) {
         let rx_timestamp_ms = timestamp_utc().as_millis();
         trades.into_iter().for_each(|trade| {
-            self.trades
-                .push(TimestampedTrade { rx_timestamp_ms, trade });
+            if &trade.coin == TRADES_COIN {
+                self.trades
+                    .push(TimestampedTrade { rx_timestamp_ms, trade });
+            }
         });
     }
 }
@@ -150,14 +150,18 @@ struct TimestampedTrade {
 
 #[derive(Debug)]
 struct TradeTimeComparionMetrics {
-    cache0:                  &'static str,
-    cache1:                  &'static str,
-    trades0:                 usize,
-    trades1:                 usize,
-    total_similiar_trades:   usize,
-    avg_latency_lag0_ms:     f64,
-    avg_latency_lag1_ms:     f64,
-    avg_diff_latency_lag_ms: f64
+    cache0: &'static str,
+    cache1: &'static str,
+    trades0: usize,
+    trades1: usize,
+    total_similiar_trades: usize,
+    avg_latency_lag0_ms: f64,
+    avg_latency_lag1_ms: f64,
+    avg_diff_latency_lag_ms: f64,
+    min_max_first_rx_time0_ms: (u128, u128),
+    min_max_first_rx_time1_ms: (u128, u128),
+    min_max_first_trade_time0_ms: (u64, u64),
+    min_max_first_trade_time1_ms: (u64, u64)
 }
 
 impl TradeTimeComparionMetrics {
@@ -202,6 +206,56 @@ impl TradeTimeComparionMetrics {
                 }
             );
 
+        let min_first_rx_time0_ms = cache0
+            .trades
+            .iter()
+            .map(|trade| trade.rx_timestamp_ms)
+            .min()
+            .unwrap();
+        let max_first_rx_time0_ms = cache0
+            .trades
+            .iter()
+            .map(|trade| trade.rx_timestamp_ms)
+            .max()
+            .unwrap();
+        let min_first_rx_time1_ms = cache1
+            .trades
+            .iter()
+            .map(|trade| trade.rx_timestamp_ms)
+            .min()
+            .unwrap();
+        let max_first_rx_time1_ms = cache1
+            .trades
+            .iter()
+            .map(|trade| trade.rx_timestamp_ms)
+            .max()
+            .unwrap();
+
+        let min_first_trade_time0_ms = cache0
+            .trades
+            .iter()
+            .map(|trade| trade.trade.time)
+            .min()
+            .unwrap();
+        let max_first_trade_time0_ms = cache0
+            .trades
+            .iter()
+            .map(|trade| trade.trade.time)
+            .max()
+            .unwrap();
+        let min_first_trade_time1_ms = cache1
+            .trades
+            .iter()
+            .map(|trade| trade.trade.time)
+            .min()
+            .unwrap();
+        let max_first_trade_time1_ms = cache1
+            .trades
+            .iter()
+            .map(|trade| trade.trade.time)
+            .max()
+            .unwrap();
+
         TradeTimeComparionMetrics {
             cache0: cache0.name,
             cache1: cache1.name,
@@ -210,7 +264,11 @@ impl TradeTimeComparionMetrics {
             total_similiar_trades: similiar_trades.len(),
             avg_latency_lag0_ms,
             avg_latency_lag1_ms,
-            avg_diff_latency_lag_ms
+            avg_diff_latency_lag_ms,
+            min_max_first_rx_time0_ms: (min_first_rx_time0_ms, max_first_rx_time0_ms),
+            min_max_first_rx_time1_ms: (min_first_rx_time1_ms, max_first_rx_time1_ms),
+            min_max_first_trade_time0_ms: (min_first_trade_time0_ms, max_first_trade_time0_ms),
+            min_max_first_trade_time1_ms: (min_first_trade_time1_ms, max_first_trade_time1_ms)
         }
     }
 
