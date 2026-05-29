@@ -9,5 +9,8 @@ mod ws_streams;
 
 #[cfg(target_os = "linux")]
 fn main() {
-    ws_streams::run_trades_ws_bench();
+    if let Err(err) = ws_streams::run_trades_ws_bench() {
+        eprintln!("{err:?}");
+        std::process::exit(1);
+    }
 }

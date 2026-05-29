@@ -1,50 +1,84 @@
 use std::{
     collections::HashMap,
+    io::ErrorKind,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc
     },
-    thread::JoinHandle
+    thread::JoinHandle,
+    time::Duration
 };
 
 use hyperliquid_db::{
     constructed_data::{HyperliquidDataDeriver, TradeDeriver, types::Trade},
     hl_fs::HyperliquidDataDirKind
 };
-use itertools::Itertools;
+use serde::Deserialize;
 
-use crate::ws_streams::utils::{spawn_hl_watcher, spawn_hl_websocket, timestamp_utc};
+use crate::ws_streams::utils::{
+    set_hl_websocket_read_timeout, spawn_hl_trades_websocket, spawn_hl_watcher, timestamp_utc
+};
 
 const TIMEOUT_SECS: u64 = 30;
+const PUBLIC_WS_READ_TIMEOUT_MS: u64 = 100;
+const IMPLEMENTED_STREAM_RECV_TIMEOUT_MS: u64 = 100;
+const TRADES_COIN_ENV: &str = "HL_WS_TRADES_COIN";
+const TRADES_COIN: &str = "BTC";
 static IS_RUNNING: AtomicBool = AtomicBool::new(true);
 
-pub fn run_trades_ws_bench() {
+pub fn run_trades_ws_bench() -> eyre::Result<()> {
+    println!("subscribing to public trades websocket for {TRADES_COIN}");
+
     let public_ws_stream_handle = run_public_ws_stream();
     let implemented_stream_handle = run_implemented_stream();
 
-    std::thread::sleep(std::time::Duration::from_secs(TIMEOUT_SECS));
+    std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
     IS_RUNNING.store(false, Ordering::Release);
 
-    let public_ws_stream = public_ws_stream_handle.join().unwrap().unwrap();
-    let implemented_stream = implemented_stream_handle.join().unwrap().unwrap();
+    let public_ws_stream = public_ws_stream_handle
+        .join()
+        .map_err(|_| eyre::eyre!("public websocket stream thread panicked"))??;
+    let implemented_stream = implemented_stream_handle
+        .join()
+        .map_err(|_| eyre::eyre!("implemented stream thread panicked"))??;
 
     let comparison =
         TradeTimeComparionMetrics::compare_trade_caches(public_ws_stream, implemented_stream);
 
     comparison.pretty_print();
+
+    Ok(())
 }
 
 fn run_public_ws_stream() -> JoinHandle<eyre::Result<TradeCache>> {
     std::thread::spawn(move || {
-        let mut public_ws_stream = spawn_hl_websocket("trades")?;
+        let mut public_ws_stream = spawn_hl_trades_websocket(TRADES_COIN)?;
+        set_hl_websocket_read_timeout(
+            &mut public_ws_stream,
+            Some(Duration::from_millis(PUBLIC_WS_READ_TIMEOUT_MS))
+        )?;
 
         let mut cache = TradeCache::new("public ws");
 
         loop {
-            let value = public_ws_stream.read()?;
-            if value.is_text() {
-                let trades: Vec<Trade> = serde_json::from_str(&value.to_text()?)?;
-                cache.new_trades(trades);
+            let message = match public_ws_stream.read() {
+                Ok(message) => message,
+                Err(tungstenite::Error::Io(error))
+                    if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
+                {
+                    if !IS_RUNNING.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    continue;
+                }
+                Err(error) => return Err(error.into())
+            };
+            if message.is_text() {
+                let message: WsMessage = serde_json::from_str(message.to_text()?)?;
+                if message.channel == "trades" {
+                    let trades = serde_json::from_value(message.data)?;
+                    cache.new_trades(trades);
+                }
             }
 
             if !IS_RUNNING.load(Ordering::Relaxed) {
@@ -64,7 +98,20 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
         let mut deriver = TradeDeriver::new();
 
         loop {
-            let data = implemented_stream.recv()??;
+            let data = match implemented_stream
+                .recv_timeout(Duration::from_millis(IMPLEMENTED_STREAM_RECV_TIMEOUT_MS))
+            {
+                Ok(data) => data?,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if !IS_RUNNING.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(eyre::eyre!("implemented stream channel disconnected"));
+                }
+            };
 
             let trades = match data.name {
                 HyperliquidDataDirKind::NodeFills => deriver.handle_raw_data(data)?,
@@ -81,6 +128,13 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
     })
 }
 
+#[derive(Deserialize)]
+struct WsMessage {
+    channel: String,
+    #[serde(default)]
+    data:    serde_json::Value
+}
+
 #[derive(Debug)]
 struct TradeCache {
     name:   &'static str,
@@ -92,11 +146,6 @@ impl TradeCache {
         Self { name, trades: Vec::new() }
     }
 
-    fn new_trade(&mut self, trade: Trade) {
-        self.trades
-            .push(TimestampedTrade { rx_timestamp_ms: timestamp_utc().as_millis(), trade });
-    }
-
     fn new_trades(&mut self, trades: Vec<Trade>) {
         let rx_timestamp_ms = timestamp_utc().as_millis();
         trades.into_iter().for_each(|trade| {
@@ -106,7 +155,7 @@ impl TradeCache {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TimestampedTrade {
     rx_timestamp_ms: u128,
     trade:           Trade
@@ -155,11 +204,11 @@ impl TradeTimeComparionMetrics {
                         (trade0.rx_timestamp_ms - trade0.trade.time as u128) as f64;
                     let latency_lag1_ms =
                         (trade1.rx_timestamp_ms - trade1.trade.time as u128) as f64;
-                    let diff_latency_lag_ms = (latency_lag0_ms - latency_lag1_ms);
+                    let diff_latency_lag_ms = latency_lag0_ms - latency_lag1_ms;
 
-                    avg_latency_lag0_ms += (latency_lag0_ms / similiar_trades_len as f64);
-                    avg_latency_lag1_ms += (latency_lag1_ms / similiar_trades_len as f64);
-                    avg_diff_latency_lag_ms += (diff_latency_lag_ms / similiar_trades_len as f64);
+                    avg_latency_lag0_ms += latency_lag0_ms / similiar_trades_len as f64;
+                    avg_latency_lag1_ms += latency_lag1_ms / similiar_trades_len as f64;
+                    avg_diff_latency_lag_ms += diff_latency_lag_ms / similiar_trades_len as f64;
 
                     (avg_latency_lag0_ms, avg_latency_lag1_ms, avg_diff_latency_lag_ms)
                 }
