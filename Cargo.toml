@@ -28,3 +28,16 @@ harness = false
 name = "ws_speed"
 path = "bench/ws_speed.rs"
 harness = false
+
+
+[profile.release]
+lto = "fat"
+opt-level = 3
+codegen-units = 15
+
+
+[profile.maxperf]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+incremental = false
