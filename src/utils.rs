@@ -17,7 +17,11 @@ pub fn init_logging(level: Level) {
         .with_ansi(true)
         .with_target(true);
 
-    let filter = tracing_subscriber::filter::Targets::new().with_target("hyperliquid_db", level);
+    let filter = tracing_subscriber::filter::Targets::new()
+        .with_target("hyperliquid_db", level)
+        .with_target("hyperliquid-db", level)
+        .with_target("hyperliquid_db_rs", level)
+        .with_target("hyperliquid-db-rs", level);
 
     let _ = tracing_subscriber::registry()
         .with(format)
