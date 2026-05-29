@@ -15,6 +15,7 @@ pub mod hl_fs;
 pub const HYPERLIQUID_DATA_DIR: &str = "/var/lib/hyperliquid/hl/data";
 
 pub fn run_stream() -> eyre::Result<()> {
+    crate::utils::init_logging();
     let (out_tx, out_rx) = mpsc::channel();
 
     println!("initializing watcher");
