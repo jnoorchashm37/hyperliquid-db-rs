@@ -26,9 +26,10 @@ pub fn run_stream() -> eyre::Result<()> {
     loop {
         let data = out_rx.recv()??;
 
-        match data.name {
+        let out = match data.name {
             HyperliquidDataDirKind::NodeFills => deriver.handle_raw_data(data)?,
             _ => unreachable!()
         };
+        println!("{out:?}");
     }
 }
