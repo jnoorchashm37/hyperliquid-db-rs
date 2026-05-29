@@ -2,27 +2,13 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::hl_fs::schemas::{NodeFillsFill, NodeFillsRow, NodeFillsSide};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum TradeSide {
-    #[serde(rename = "A")]
-    Ask,
-    #[serde(rename = "B")]
-    Bid
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Trade {
-    pub coin:  String,
-    pub side:  TradeSide,
-    pub px:    String,
-    pub sz:    String,
-    pub hash:  String,
-    pub time:  u64,
-    pub tid:   u64,
-    pub users: [String; 2]
-}
+use crate::{
+    constructed_data::{
+        HyperliquidDataDeriver,
+        types::{PendingTrade, Trade}
+    },
+    hl_fs::schemas::{NodeFillsFill, NodeFillsRow, NodeFillsSide}
+};
 
 #[derive(Default)]
 pub struct TradeDeriver {
@@ -34,19 +20,11 @@ impl TradeDeriver {
         Self::default()
     }
 
-    pub fn new_fill_data(&mut self, data: NodeFillsRow) -> eyre::Result<()> {
-        for fill in data.events {
-            self.new_fill(fill)?;
-        }
-
-        Ok(())
-    }
-
     pub fn pending_fill_count(&self) -> usize {
         self.pending_fills.len()
     }
 
-    fn new_fill(&mut self, fill: NodeFillsFill) -> eyre::Result<()> {
+    fn new_fill(&mut self, fill: NodeFillsFill) -> eyre::Result<Option<Trade>> {
         let tid = fill.tid;
         let pending_trade = self.pending_fills.entry(tid).or_default();
 
@@ -56,7 +34,7 @@ impl TradeDeriver {
         }
 
         if !pending_trade.is_complete() {
-            return Ok(());
+            return Ok(None);
         }
 
         let pending_trade = self
@@ -64,82 +42,36 @@ impl TradeDeriver {
             .remove(&tid)
             .expect("pending trade exists");
         let trade = pending_trade.into_trade()?;
-        println!("{}", serde_json::to_string(&trade)?);
+        // println!("{}", serde_json::to_string(&trade)?);
 
-        Ok(())
+        Ok(Some(trade))
     }
 }
 
-#[derive(Default)]
-struct PendingTrade {
-    ask: Option<NodeFillsFill>,
-    bid: Option<NodeFillsFill>
-}
+impl HyperliquidDataDeriver for TradeDeriver {
+    type ParsedType = Trade;
+    type RawType = NodeFillsRow;
 
-impl PendingTrade {
-    fn is_complete(&self) -> bool {
-        self.ask.is_some() && self.bid.is_some()
+    fn parse_raw_type(data: &[u8]) -> eyre::Result<Self::RawType> {
+        Ok(serde_json::from_slice::<Self::RawType>(data)?)
     }
 
-    fn into_trade(self) -> eyre::Result<Trade> {
-        let ask = self.ask.expect("complete trade has ask fill");
-        let bid = self.bid.expect("complete trade has bid fill");
-
-        if ask.coin != bid.coin {
-            return Err(eyre::eyre!(
-                "matched fills for tid {} have different coins: ask={}, bid={}",
-                ask.tid,
-                ask.coin,
-                bid.coin
-            ));
-        }
-        if ask.px != bid.px {
-            return Err(eyre::eyre!(
-                "matched fills for tid {} have different prices: ask={}, bid={}",
-                ask.tid,
-                ask.px,
-                bid.px
-            ));
-        }
-        if ask.sz != bid.sz {
-            return Err(eyre::eyre!(
-                "matched fills for tid {} have different sizes: ask={}, bid={}",
-                ask.tid,
-                ask.sz,
-                bid.sz
-            ));
+    fn construct_data(&mut self, data: Self::RawType) -> eyre::Result<Vec<Self::ParsedType>> {
+        let mut trades = Vec::new();
+        for fill in data.events {
+            if let Some(trade) = self.new_fill(fill)? {
+                trades.push(trade);
+            }
         }
 
-        let side = if ask.crossed { TradeSide::Ask } else { TradeSide::Bid };
-
-        Ok(Trade {
-            coin: ask.coin,
-            side,
-            px: decimal_string(ask.px),
-            sz: decimal_string(ask.sz),
-            hash: ask.hash,
-            time: ask.time,
-            tid: ask.tid,
-            users: [bid.user, ask.user]
-        })
+        Ok(trades)
     }
-}
-
-fn decimal_string(value: f64) -> String {
-    let mut value = format!("{value:.8}");
-    while value.contains('.') && value.ends_with('0') {
-        value.pop();
-    }
-    if value.ends_with('.') {
-        value.push('0');
-    }
-
-    value
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constructed_data::types::*;
 
     #[test]
     fn derives_order_book_server_trade_shape() {
@@ -157,10 +89,10 @@ mod tests {
     fn matches_fills_across_updates() {
         let mut deriver = TradeDeriver::new();
 
-        deriver.new_fill_data(row(vec![ask_fill(false)])).unwrap();
+        deriver.construct_data(row(vec![ask_fill(false)])).unwrap();
         assert_eq!(deriver.pending_fill_count(), 1);
 
-        deriver.new_fill_data(row(vec![bid_fill(true)])).unwrap();
+        deriver.construct_data(row(vec![bid_fill(true)])).unwrap();
         assert_eq!(deriver.pending_fill_count(), 0);
     }
 
