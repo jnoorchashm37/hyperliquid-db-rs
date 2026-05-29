@@ -12,7 +12,7 @@ pub enum TradeSide {
     Bid
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct Trade {
     pub coin:  String,
     pub side:  TradeSide,

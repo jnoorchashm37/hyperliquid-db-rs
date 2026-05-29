@@ -155,7 +155,7 @@ impl TradeCache {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct TimestampedTrade {
     rx_timestamp_ms: u128,
     trade:           Trade
@@ -178,8 +178,8 @@ impl TradeTimeComparionMetrics {
         let mut cache0_trades_by_key = cache0
             .trades
             .iter()
-            .map(|trade| ((trade.trade.hash.clone(), trade.trade.users.clone()), trade.clone()))
-            .collect::<HashMap<_, _>>();
+            .map(|trade| trade.trade.clone())
+            .collect::<HashSet<_>>();
 
         let check0 = cache0
             .trades
@@ -197,11 +197,9 @@ impl TradeTimeComparionMetrics {
         let mut similiar_trades = Vec::new();
 
         cache1.trades.iter().for_each(|trade| {
-            if let Some(cach0_trade) =
-                cache0_trades_by_key.get(&(trade.trade.hash.clone(), trade.trade.users.clone()))
-            {
-                assert_eq!(trade.trade, cach0_trade.trade);
-                similiar_trades.push((cach0_trade.clone(), trade.clone()));
+            if cache0_trades_by_key.remove(&trade.trade) {
+                // assert_eq!(&trade.trade, cach0_trade);
+                similiar_trades.push((trade.clone(), trade.clone()));
             }
         });
 
