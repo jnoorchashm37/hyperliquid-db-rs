@@ -19,7 +19,7 @@ use crate::ws_streams::utils::{
     set_hl_websocket_read_timeout, spawn_hl_trades_websocket, spawn_hl_watcher, timestamp_utc
 };
 
-const TIMEOUT_SECS: u64 = 30;
+const TIMEOUT_SECS: u64 = 180;
 const PUBLIC_WS_READ_TIMEOUT_MS: u64 = 100;
 const IMPLEMENTED_STREAM_RECV_TIMEOUT_MS: u64 = 100;
 const TRADES_COIN_ENV: &str = "HL_WS_TRADES_COIN";
