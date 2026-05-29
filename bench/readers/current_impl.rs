@@ -1,8 +1,8 @@
 use std::{path::Path, sync::mpsc, thread};
 
-use hyperliquid_db::fs_watchers::{
-    directory::DirectoryWatcher,
-    types::{FsOutData, HyperliquidDataDirKind}
+use hyperliquid_db::{
+    fs_handlers::{directory_watcher::DirectoryWatcher, types::FsOutData},
+    hl_fs::HyperliquidDataDirKind
 };
 
 pub fn spawn_file_reader(
@@ -11,7 +11,7 @@ pub fn spawn_file_reader(
 ) -> eyre::Result<mpsc::Receiver<eyre::Result<FsOutData>>> {
     let (tx, rx) = mpsc::channel();
 
-    let watcher = DirectoryWatcher::new(name, &dir_path.to_path_buf(), tx)?;
+    let watcher = DirectoryWatcher::new(name, tx)?;
 
     thread::spawn(move || {
         watcher.run();

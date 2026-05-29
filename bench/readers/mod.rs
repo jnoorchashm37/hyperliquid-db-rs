@@ -1,4 +1,4 @@
-#![cfg(target_os = "linux")]
+// #![cfg(target_os = "linux")]
 
 mod current_impl;
 mod existing_fs_reader;
@@ -11,9 +11,10 @@ use std::{
     time::{Duration, Instant}
 };
 
-use hyperliquid_db::fs_watchers::types::{FsOutData, HyperliquidDataDirKind};
+use hyperliquid_db::{
+    HYPERLIQUID_DATA_DIR, fs_handlers::types::FsOutData, hl_fs::HyperliquidDataDirKind
+};
 
-const BENCHMARK_DIRECTORY: &str = "/var/lib/hyperliquid/hl/data/node_slow_block_times";
 const BENCHMARK_RUNS: usize = 10;
 const BENCHMARK_CHUNKS: usize = 100;
 const BENCHMARK_CHUNK_BYTES: usize = 256;
@@ -32,7 +33,7 @@ pub fn run_fs_readers_bench() {
 
 fn run() -> eyre::Result<()> {
     let config = BenchConfig::default();
-    let directory = Path::new(BENCHMARK_DIRECTORY);
+    let directory = Path::new(HYPERLIQUID_DATA_DIR);
     if !directory.is_dir() {
         return Err(eyre::eyre!(
             "BENCHMARK_DIRECTORY does not exist or is not a directory: {}",
@@ -120,7 +121,7 @@ fn spawn_reader_collector(
     spawn_reader: SpawnReader,
     directory: &Path
 ) -> eyre::Result<ReaderCollector> {
-    let rx = spawn_reader(HyperliquidDataDirKind::ReplicaCmds, directory)?;
+    let rx = spawn_reader(HyperliquidDataDirKind::NodeFills, directory)?;
     let (command_tx, command_rx) = mpsc::channel();
     let (result_tx, result_rx) = mpsc::channel();
 
@@ -225,7 +226,7 @@ fn recv_target_bytes(
 
         let channel_received_at = Instant::now();
         notification_to_channel
-            .push(channel_received_at.saturating_duration_since(chunk.notification_received_at));
+            .push(std::time::Duration::from_millis(chunk.notification_received_at_ms as u64));
 
         received_bytes += chunk.bytes.len();
     }

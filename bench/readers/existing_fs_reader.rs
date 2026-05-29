@@ -7,7 +7,7 @@ use std::{
     time::Instant
 };
 
-use hyperliquid_db::fs_watchers::types::{FsOutData, HyperliquidDataDirKind};
+use hyperliquid_db::{fs_handlers::types::FsOutData, hl_fs::HyperliquidDataDirKind};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 
 pub fn spawn_file_reader(
@@ -20,8 +20,11 @@ pub fn spawn_file_reader(
 
     let mut watcher = notify::recommended_watcher(move |res| {
         let _ = fs_event_tx.send(TimedFsEvent {
-            event:                    res,
-            notification_received_at: Instant::now()
+            event: res,
+            notification_received_at_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
         });
     })?;
     watcher.watch(&directory, RecursiveMode::Recursive)?;
@@ -44,8 +47,8 @@ struct ExistingFsReader {
 }
 
 struct TimedFsEvent {
-    event:                    notify::Result<Event>,
-    notification_received_at: Instant
+    event: notify::Result<Event>,
+    notification_received_at_ms: u128
 }
 
 impl ExistingFsReader {
@@ -56,15 +59,15 @@ impl ExistingFsReader {
     ) -> eyre::Result<()> {
         while let Ok(timed_event) = fs_event_rx.recv() {
             let event = timed_event.event?;
-            let notification_received_at = timed_event.notification_received_at;
+            let notification_received_at_ms = timed_event.notification_received_at_ms;
 
             if event.kind.is_create() {
                 for path in event.paths {
-                    self.on_file_creation(path, notification_received_at)?;
+                    self.on_file_creation(path, notification_received_at_ms)?;
                 }
             } else if event.kind.is_modify() {
                 for path in event.paths {
-                    self.on_file_modification(path, notification_received_at)?;
+                    self.on_file_modification(path, notification_received_at_ms)?;
                 }
             }
         }
@@ -75,13 +78,13 @@ impl ExistingFsReader {
     fn on_file_creation(
         &mut self,
         new_file: PathBuf,
-        notification_received_at: Instant
+        notification_received_at_ms: u128
     ) -> eyre::Result<()> {
         if !new_file.is_file() {
             return Ok(());
         }
 
-        self.flush_current_file(notification_received_at)?;
+        self.flush_current_file(notification_received_at_ms)?;
         self.current_file = Some(File::open(&new_file)?);
         self.current_path = Some(new_file);
 
@@ -91,14 +94,14 @@ impl ExistingFsReader {
     fn on_file_modification(
         &mut self,
         new_file: PathBuf,
-        notification_received_at: Instant
+        notification_received_at_ms: u128
     ) -> eyre::Result<()> {
         if !new_file.is_file() {
             return Ok(());
         }
 
         if self.current_file.is_some() {
-            self.flush_current_file(notification_received_at)
+            self.flush_current_file(notification_received_at_ms)
         } else {
             let mut file = File::open(&new_file)?;
             file.seek(SeekFrom::End(0))?;
@@ -108,7 +111,7 @@ impl ExistingFsReader {
         }
     }
 
-    fn flush_current_file(&mut self, notification_received_at: Instant) -> eyre::Result<()> {
+    fn flush_current_file(&mut self, notification_received_at_ms: u128) -> eyre::Result<()> {
         let Some(file) = self.current_file.as_mut() else {
             return Ok(());
         };
@@ -130,7 +133,7 @@ impl ExistingFsReader {
             bytes: data.into_bytes(),
             path,
             chunk_len,
-            notification_received_at
+            notification_received_at_ms
         }))?;
 
         Ok(())
