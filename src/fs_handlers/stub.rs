@@ -15,8 +15,10 @@ impl DirectoryWatcher {
     }
 
     pub fn run(self) {
-        self.out_tx
-            .send(Err(eyre::eyre!("cannot run directory watcher in stub mode")))
-            .unwrap();
+        std::thread::spawn(move || {
+            self.out_tx
+                .send(Err(eyre::eyre!("cannot run directory watcher in stub mode")))
+                .unwrap();
+        });
     }
 }
