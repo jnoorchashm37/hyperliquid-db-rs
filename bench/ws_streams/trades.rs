@@ -178,13 +178,15 @@ impl TradeTimeComparionMetrics {
         let mut cache0_trades_by_key = cache0
             .trades
             .iter()
-            .map(|trade| (trade.trade.hash.clone(), trade.clone()))
+            .map(|trade| ((trade.trade.hash.clone(), trade.trade.users.clone()), trade.clone()))
             .collect::<HashMap<_, _>>();
 
         let mut similiar_trades = Vec::new();
 
         cache1.trades.iter().for_each(|trade| {
-            if let Some(cach0_trade) = cache0_trades_by_key.remove(&trade.trade.hash) {
+            if let Some(cach0_trade) =
+                cache0_trades_by_key.remove(&(trade.trade.hash.clone(), trade.trade.users.clone()))
+            {
                 assert_eq!(trade.trade, cach0_trade.trade);
                 similiar_trades.push((cach0_trade.clone(), trade.clone()));
             }
