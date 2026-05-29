@@ -99,7 +99,7 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
         loop {
             let data = implemented_stream.recv()??;
 
-            let rx_timestamp_ms = timestamp_utc().as_millis();
+            let rx_timestamp_ms = data.notification_received_at_ms;
             let trades = match data.name {
                 HyperliquidDataDirKind::NodeFills => deriver.handle_raw_data(data)?,
                 _ => unreachable!()
