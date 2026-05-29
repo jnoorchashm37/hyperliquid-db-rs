@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    constructed_data::{
-        HyperliquidDataDeriver,
-        types::{PendingTrade, Trade}
-    },
-    hl_fs::schemas::{NodeFillsFill, NodeFillsRow, NodeFillsSide}
+    derivers::HyperliquidDataDeriver,
+    hl_fs::schemas::{NodeFillsFill, NodeFillsRow, NodeFillsSide},
+    types::{PendingTrade, Trade}
 };
 
 #[derive(Default)]
@@ -75,9 +73,7 @@ impl HyperliquidDataDeriver for TradeDeriver {
 mod tests {
 
     use super::*;
-    use crate::{
-        constructed_data::types::*, fs_handlers::types::FsOutData, hl_fs::HyperliquidDataDirKind
-    };
+    use crate::{fs_handlers::types::FsOutData, hl_fs::HyperliquidDataDirKind, types::*};
 
     #[test]
     fn derives_order_book_server_trade_shape() {

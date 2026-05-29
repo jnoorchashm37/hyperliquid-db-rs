@@ -1,12 +1,13 @@
 use std::sync::mpsc;
 
-pub mod constructed_data;
+pub mod derivers;
+pub mod types;
 pub mod utils;
 
 use tracing::Level;
 
 use crate::{
-    constructed_data::{HyperliquidDataDeriver, TradeDeriver},
+    derivers::{HyperliquidDataDeriver, TradeDeriver},
     fs_handlers::DirectoryWatcher,
     hl_fs::HyperliquidDataDirKind
 };

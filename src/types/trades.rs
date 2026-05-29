@@ -2,14 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::hl_fs::schemas::NodeFillsFill;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum TradeSide {
-    #[serde(rename = "A")]
-    Ask,
-    #[serde(rename = "B")]
-    Bid
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct Trade {
     pub coin:  String,
@@ -20,6 +12,14 @@ pub struct Trade {
     pub time:  u64,
     pub tid:   u64,
     pub users: [String; 2]
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum TradeSide {
+    #[serde(rename = "A")]
+    Ask,
+    #[serde(rename = "B")]
+    Bid
 }
 
 #[derive(Default)]

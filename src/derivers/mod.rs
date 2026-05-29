@@ -4,8 +4,6 @@ pub use trades::*;
 
 use crate::fs_handlers::types::FsOutData;
 
-pub mod types;
-
 pub trait HyperliquidDataDeriver {
     type RawType;
     type ParsedType;
