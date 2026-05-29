@@ -98,20 +98,7 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
         let mut deriver = TradeDeriver::new();
 
         loop {
-            let data = match implemented_stream
-                .recv_timeout(Duration::from_millis(IMPLEMENTED_STREAM_RECV_TIMEOUT_MS))
-            {
-                Ok(data) => data?,
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if !IS_RUNNING.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    continue;
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(eyre::eyre!("implemented stream channel disconnected"));
-                }
-            };
+            let data = implemented_stream.recv()??;
 
             let trades = match data.name {
                 HyperliquidDataDirKind::NodeFills => deriver.handle_raw_data(data)?,
