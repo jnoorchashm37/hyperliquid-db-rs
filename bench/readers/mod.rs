@@ -14,7 +14,7 @@ use std::{
 use eyre::WrapErr;
 use hyperliquid_db::{
     HYPERLIQUID_DATA_DIR,
-    constructed_data::{HyperliquidDataDeriver, TradeDeriver},
+    derivers::{HyperliquidDataDeriver, TradeDeriver},
     fs_handlers::types::FsOutData,
     hl_fs::HyperliquidDataDirKind,
     utils::{NS_PER_MS, NS_PER_SEC, unix_timestamp}

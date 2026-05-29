@@ -85,7 +85,7 @@ pub struct FsOutData {
     pub bytes: Vec<u8>,
     pub path: String,
     pub chunk_len: usize,
-    pub notification_received_at_ms: u128,
+    pub notification_received_at_ns: u128,
     pub pipeline: FsPipelineTimestamps
 }
 

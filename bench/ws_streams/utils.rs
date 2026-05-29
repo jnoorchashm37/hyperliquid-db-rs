@@ -52,9 +52,3 @@ pub fn spawn_hl_watcher() -> eyre::Result<Receiver<eyre::Result<FsOutData>>> {
     watcher.run();
     Ok(out_rx)
 }
-
-pub fn timestamp_utc() -> Duration {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-}

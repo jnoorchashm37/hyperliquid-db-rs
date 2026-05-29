@@ -9,7 +9,7 @@ use std::{
 use hyperliquid_db::{
     fs_handlers::types::{FsOutData, FsPipelineTimestamps},
     hl_fs::HyperliquidDataDirKind,
-    utils::{NS_PER_MS, unix_timestamp}
+    utils::unix_timestamp
 };
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 
@@ -140,7 +140,7 @@ impl ExistingFsReader {
             bytes: data.into_bytes(),
             path,
             chunk_len,
-            notification_received_at_ms: notification_batch_received_at_ns / NS_PER_MS,
+            notification_received_at_ns: notification_batch_received_at_ns,
             pipeline: FsPipelineTimestamps {
                 notification_batch_received_at_ns,
                 drain_file_started_at_ns,

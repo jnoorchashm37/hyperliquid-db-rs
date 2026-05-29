@@ -73,7 +73,10 @@ impl HyperliquidDataDeriver for TradeDeriver {
 mod tests {
 
     use super::*;
-    use crate::{fs_handlers::types::FsOutData, hl_fs::HyperliquidDataDirKind, types::*};
+    use crate::{
+        fs_handlers::types::FsOutData, hl_fs::HyperliquidDataDirKind, types::*,
+        utils::unix_timestamp
+    };
 
     #[test]
     fn derives_order_book_server_trade_shape() {
@@ -181,10 +184,7 @@ mod tests {
             bytes,
             path: "test-node-fills".to_string(),
             chunk_len,
-            notification_received_at_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis(),
+            notification_received_at_ns: unix_timestamp().as_nanos(),
             pipeline: Default::default()
         }
     }
