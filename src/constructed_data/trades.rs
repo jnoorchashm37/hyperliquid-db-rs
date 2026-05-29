@@ -189,7 +189,8 @@ mod tests {
             notification_received_at_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_millis()
+                .as_millis(),
+            pipeline: Default::default()
         }
     }
 }
