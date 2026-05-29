@@ -19,7 +19,7 @@ use crate::ws_streams::utils::{
     set_hl_websocket_read_timeout, spawn_hl_trades_websocket, spawn_hl_watcher, timestamp_utc
 };
 
-const TIMEOUT_SECS: u64 = 180;
+const TIMEOUT_SECS: u64 = 60;
 const PUBLIC_WS_READ_TIMEOUT_MS: u64 = 100;
 const TRADES_COIN: &str = "BTC";
 static IS_RUNNING: AtomicBool = AtomicBool::new(true);
@@ -169,16 +169,15 @@ impl TradeTimeComparionMetrics {
         let mut cache0_trades_by_key = cache0
             .trades
             .iter()
-            .map(|trade| trade.clone())
-            .collect::<HashSet<_>>();
+            .map(|trade| (trade.trade.clone(), trade.clone()))
+            .collect::<HashMap<_, _>>();
 
         let mut similiar_trades = Vec::new();
 
         cache1.trades.iter().for_each(|trade| {
-            if let Some(cach0_trade) = cache0_trades_by_key.get(&trade).cloned() {
+            if let Some(cach0_trade) = cache0_trades_by_key.remove(&trade.trade) {
                 // assert_eq!(&trade.trade, cach0_trade);
                 similiar_trades.push((cach0_trade.clone(), trade.clone()));
-                cache0_trades_by_key.remove(&trade);
             }
         });
 
