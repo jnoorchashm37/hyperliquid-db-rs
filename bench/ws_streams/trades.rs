@@ -72,10 +72,11 @@ fn run_public_ws_stream() -> JoinHandle<eyre::Result<TradeCache>> {
                 Err(error) => return Err(error.into())
             };
             if message.is_text() {
+                let rx_timestamp_ms = timestamp_utc().as_millis();
                 let message: WsMessage = serde_json::from_str(message.to_text()?)?;
                 if message.channel == "trades" {
                     let trades = serde_json::from_value(message.data)?;
-                    cache.new_trades(trades);
+                    cache.new_trades(trades, rx_timestamp_ms);
                 }
             }
 
@@ -98,12 +99,13 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
         loop {
             let data = implemented_stream.recv()??;
 
+            let rx_timestamp_ms = timestamp_utc().as_millis();
             let trades = match data.name {
                 HyperliquidDataDirKind::NodeFills => deriver.handle_raw_data(data)?,
                 _ => unreachable!()
             };
 
-            cache.new_trades(trades);
+            cache.new_trades(trades, rx_timestamp_ms);
 
             if !IS_RUNNING.load(Ordering::Relaxed) {
                 break
@@ -131,8 +133,7 @@ impl TradeCache {
         Self { name, trades: Vec::new() }
     }
 
-    fn new_trades(&mut self, trades: Vec<Trade>) {
-        let rx_timestamp_ms = timestamp_utc().as_millis();
+    fn new_trades(&mut self, trades: Vec<Trade>, rx_timestamp_ms: u128) {
         trades.into_iter().for_each(|trade| {
             if &trade.coin == TRADES_COIN {
                 self.trades
