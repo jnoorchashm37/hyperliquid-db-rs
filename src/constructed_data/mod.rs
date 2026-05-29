@@ -1,6 +1,5 @@
 mod trades;
 use eyre::Context;
-use serde::de::DeserializeOwned;
 pub use trades::*;
 
 use crate::fs_handlers::types::FsOutData;
@@ -13,12 +12,13 @@ pub trait HyperliquidDataDeriver {
 
     fn handle_raw_data(&mut self, data: FsOutData) -> eyre::Result<Vec<Self::ParsedType>> {
         let path = data.path;
-        let mut buffer = Vec::new();
+        let mut buffer = std::mem::take(self.line_buffer());
         buffer.extend_from_slice(&data.bytes);
 
         let mut out_data = Vec::new();
         let mut line_start = 0;
         let mut consumed_len = 0;
+        let mut result = Ok(());
         for newline_idx in buffer
             .iter()
             .enumerate()
@@ -31,12 +31,23 @@ pub trait HyperliquidDataDeriver {
                 .iter()
                 .all(|byte| byte.is_ascii_whitespace())
             {
-                let parsed_value = Self::parse_raw_type(line).wrap_err_with(|| {
+                let parsed_value = match Self::parse_raw_type(line).wrap_err_with(|| {
                     format!("failed to parse node_fills_streaming row from {path}")
-                })?;
-                // println!("{value:?}");
-                let all_values = self.construct_data(parsed_value)?;
-                out_data.extend(all_values);
+                }) {
+                    Ok(parsed_value) => parsed_value,
+                    Err(err) => {
+                        result = Err(err);
+                        break;
+                    }
+                };
+
+                match self.construct_data(parsed_value) {
+                    Ok(all_values) => out_data.extend(all_values),
+                    Err(err) => {
+                        result = Err(err);
+                        break;
+                    }
+                }
             }
             line_start = newline_idx + 1;
             consumed_len = line_start;
@@ -46,8 +57,11 @@ pub trait HyperliquidDataDeriver {
             buffer.drain(..consumed_len);
         }
 
-        Ok(out_data)
+        *self.line_buffer() = buffer;
+        result.map(|_| out_data)
     }
+
+    fn line_buffer(&mut self) -> &mut Vec<u8>;
 
     fn parse_raw_type(data: &[u8]) -> eyre::Result<Self::RawType>;
 
