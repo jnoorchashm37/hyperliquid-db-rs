@@ -5,7 +5,8 @@ pub mod trades;
 
 use crate::{
     fs_handlers::{directory_watcher::DirectoryWatcher, types::FsOutData},
-    hl_fs::{HyperliquidDataDirKind, schemas::NodeFillsRow}
+    hl_fs::{HyperliquidDataDirKind, schemas::NodeFillsRow},
+    trades::TradeDeriver
 };
 
 pub mod fs_handlers;
@@ -21,15 +22,16 @@ pub fn run_stream() -> eyre::Result<()> {
     println!("initialized watcher");
     watcher.run();
 
+    let mut deriver = TradeDeriver::new();
     loop {
-        handle_incoming(out_rx.recv()??)?;
+        handle_incoming(out_rx.recv()??, &mut deriver)?;
     }
 }
 
-fn handle_incoming(data: FsOutData) -> eyre::Result<()> {
+fn handle_incoming(data: FsOutData, deriver: &mut TradeDeriver) -> eyre::Result<()> {
     match data.name {
         HyperliquidDataDirKind::NodeFills => {
-            handle_node_fills_streaming(data)?;
+            handle_node_fills_streaming(data, deriver)?;
         }
         _ => unreachable!()
     };
@@ -37,7 +39,7 @@ fn handle_incoming(data: FsOutData) -> eyre::Result<()> {
     Ok(())
 }
 
-fn handle_node_fills_streaming(data: FsOutData) -> eyre::Result<()> {
+fn handle_node_fills_streaming(data: FsOutData, deriver: &mut TradeDeriver) -> eyre::Result<()> {
     let path = data.path;
     let mut buffer = Vec::new();
     buffer.extend_from_slice(&data.bytes);
@@ -49,7 +51,11 @@ fn handle_node_fills_streaming(data: FsOutData) -> eyre::Result<()> {
         .enumerate()
         .filter_map(|(idx, byte)| (*byte == b'\n').then_some(idx))
     {
-        parse_node_fills_streaming_row(&path, &buffer[line_start..newline_idx])?;
+        if let Some(parsed_value) =
+            parse_node_fills_streaming_row(&path, &buffer[line_start..newline_idx])?
+        {
+            deriver.new_fill_data(parsed_value)?;
+        }
         line_start = newline_idx + 1;
         consumed_len = line_start;
     }
@@ -61,15 +67,15 @@ fn handle_node_fills_streaming(data: FsOutData) -> eyre::Result<()> {
     Ok(())
 }
 
-fn parse_node_fills_streaming_row(path: &str, line: &[u8]) -> eyre::Result<()> {
+fn parse_node_fills_streaming_row(path: &str, line: &[u8]) -> eyre::Result<Option<NodeFillsRow>> {
     let line = line.strip_suffix(b"\r").unwrap_or(line);
     if line.iter().all(|byte| byte.is_ascii_whitespace()) {
-        return Ok(());
+        return Ok(None);
     }
 
     let value = serde_json::from_slice::<NodeFillsRow>(line)
         .wrap_err_with(|| format!("failed to parse node_fills_streaming row from {path}"))?;
-    println!("{value:?}");
+    // println!("{value:?}");
 
-    Ok(())
+    Ok(Some(value))
 }
