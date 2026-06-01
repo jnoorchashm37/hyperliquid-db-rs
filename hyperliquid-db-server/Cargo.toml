@@ -1,0 +1,26 @@
+[package]
+name = "hyperliquid-db-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+exclude.workspace = true
+
+[dependencies]
+hyperliquid-db-core.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+eyre.workspace = true
+notify.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+strum.workspace = true
+itertools.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+inotify.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tungstenite.workspace = true

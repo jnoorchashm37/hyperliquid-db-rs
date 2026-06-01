@@ -1,23 +1,11 @@
 use std::sync::mpsc;
 
-pub mod types;
-
-mod data_manager;
-pub use data_manager::*;
-pub mod utils;
-
+use hyperliquid_db_core::{fs_handlers::DirectoryWatcher, hl_fs::HyperliquidDirKind};
 use tracing::Level;
 
-pub mod processors;
+pub mod utils;
 
-use crate::{fs_handlers::DirectoryWatcher, hl_fs::HyperliquidDirKind};
-
-pub mod fs_handlers;
-pub mod hl_fs;
-
-pub const HYPERLIQUID_DATA_DIR: &str = "/var/lib/hyperliquid/hl/data";
-
-pub fn run_stream() -> eyre::Result<()> {
+pub fn run_server() -> eyre::Result<()> {
     crate::utils::init_logging(Level::DEBUG);
 
     let (out_tx, out_rx) = mpsc::channel();
