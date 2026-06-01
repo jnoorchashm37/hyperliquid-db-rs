@@ -4,54 +4,79 @@ use std::{
     str::FromStr
 };
 
-use crate::HYPERLIQUID_DATA_DIR;
+use strum::IntoEnumIterator;
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub enum HyperliquidDataDirKind {
-    ReplicaCmds,
-    NodeSlowBlockTimes,
-    NodeFills
+use crate::{HYPERLIQUID_DATA_DIR, hl_fs::schemas::NodeFillsRow};
+
+#[derive(Debug, Clone, PartialOrd, PartialEq)]
+pub enum HyperliquidDirData {
+    NodeFills(Vec<NodeFillsRow>)
 }
 
-impl HyperliquidDataDirKind {
-    pub fn dir_path(&self) -> PathBuf {
-        let base_dir = Path::new(HYPERLIQUID_DATA_DIR);
-        let ext_dir = match self {
-            HyperliquidDataDirKind::ReplicaCmds => "replica_cmds",
-            HyperliquidDataDirKind::NodeSlowBlockTimes => "node_slow_block_times",
-            HyperliquidDataDirKind::NodeFills => "node_fills_streaming"
-        };
-
-        base_dir.join(ext_dir)
-    }
-}
-
-impl FromStr for HyperliquidDataDirKind {
-    type Err = eyre::ErrReport;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "replica_cmds" => Ok(Self::ReplicaCmds),
-            "node_slow_block_times" => Ok(Self::NodeSlowBlockTimes),
-            "node_fills_streaming" => Ok(Self::NodeFills),
-            _ => Err(eyre::eyre!("invalid `HyperliquidDataDirKind`: {s}"))
+impl HyperliquidDirData {
+    pub fn kind(&self) -> HyperliquidDirKind {
+        match self {
+            HyperliquidDirData::NodeFills(_) => HyperliquidDirKind::NodeFills
         }
     }
 }
 
-impl fmt::Display for HyperliquidDataDirKind {
+impl From<Vec<NodeFillsRow>> for HyperliquidDirData {
+    fn from(value: Vec<NodeFillsRow>) -> Self {
+        Self::NodeFills(value)
+    }
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq, strum::EnumIter)]
+pub enum HyperliquidDirKind {
+    // ReplicaCmds,
+    // NodeSlowBlockTimes,
+    NodeFills
+}
+
+impl HyperliquidDirKind {
+    pub fn dir_path(&self) -> PathBuf {
+        let base_dir = Path::new(HYPERLIQUID_DATA_DIR);
+        let ext_dir = match self {
+            // HyperliquidDirKind::ReplicaCmds => "replica_cmds",
+            // HyperliquidDirKind::NodeSlowBlockTimes => "node_slow_block_times",
+            HyperliquidDirKind::NodeFills => "node_fills_streaming"
+        };
+
+        base_dir.join(ext_dir)
+    }
+
+    pub fn all() -> Vec<Self> {
+        Self::iter().collect()
+    }
+}
+
+impl FromStr for HyperliquidDirKind {
+    type Err = eyre::ErrReport;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            // "replica_cmds" => Ok(Self::ReplicaCmds),
+            // "node_slow_block_times" => Ok(Self::NodeSlowBlockTimes),
+            "node_fills_streaming" => Ok(Self::NodeFills),
+            _ => Err(eyre::eyre!("invalid `HyperliquidDirKind`: {s}"))
+        }
+    }
+}
+
+impl fmt::Display for HyperliquidDirKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            HyperliquidDataDirKind::ReplicaCmds => "replica_cmds",
-            HyperliquidDataDirKind::NodeSlowBlockTimes => "node_slow_block_times",
-            HyperliquidDataDirKind::NodeFills => "node_fills_streaming"
+            // HyperliquidDirKind::ReplicaCmds => "replica_cmds",
+            // HyperliquidDirKind::NodeSlowBlockTimes => "node_slow_block_times",
+            HyperliquidDirKind::NodeFills => "node_fills_streaming"
         };
 
         fmt::Display::fmt(s, f)
     }
 }
 
-impl fmt::Debug for HyperliquidDataDirKind {
+impl fmt::Debug for HyperliquidDirKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }

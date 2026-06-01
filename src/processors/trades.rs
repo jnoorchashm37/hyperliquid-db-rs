@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 
 use crate::{
-    derivers::HyperliquidDataDeriver,
-    hl_fs::schemas::{NodeFillsFill, NodeFillsRow, NodeFillsSide},
-    types::{PendingTrade, Trade}
+    hl_fs::{
+        HyperliquidDirData,
+        schemas::{NodeFillsFill, NodeFillsSide}
+    },
+    processors::HyperliquidDataProcessor,
+    types::{HyperliquidData, PendingTrade, Trade}
 };
 
 #[derive(Default)]
 pub struct TradeDeriver {
-    pending_fills: HashMap<u64, PendingTrade>,
-    line_buffer:   Vec<u8>
+    pending_fills: HashMap<u64, PendingTrade>
 }
 
 impl TradeDeriver {
@@ -45,27 +47,20 @@ impl TradeDeriver {
     }
 }
 
-impl HyperliquidDataDeriver for TradeDeriver {
-    type ParsedType = Trade;
-    type RawType = NodeFillsRow;
+impl HyperliquidDataProcessor for TradeDeriver {
+    fn handle_data(&mut self, data: HyperliquidDirData) -> eyre::Result<Option<HyperliquidData>> {
+        let fills = match data {
+            HyperliquidDirData::NodeFills(data) => data
+        };
 
-    fn line_buffer(&mut self) -> &mut Vec<u8> {
-        &mut self.line_buffer
-    }
-
-    fn parse_raw_type(data: &[u8]) -> eyre::Result<Self::RawType> {
-        Ok(serde_json::from_slice::<Self::RawType>(data)?)
-    }
-
-    fn construct_data(&mut self, data: Self::RawType) -> eyre::Result<Vec<Self::ParsedType>> {
         let mut trades = Vec::new();
-        for fill in data.events {
+        for fill in fills.into_iter().flat_map(|fill| fill.events) {
             if let Some(trade) = self.new_fill(fill)? {
                 trades.push(trade);
             }
         }
 
-        Ok(trades)
+        if trades.is_empty() { Ok(None) } else { Ok(Some(HyperliquidData::Trades(trades))) }
     }
 }
 
@@ -73,10 +68,7 @@ impl HyperliquidDataDeriver for TradeDeriver {
 mod tests {
 
     use super::*;
-    use crate::{
-        fs_handlers::types::FsOutData, hl_fs::HyperliquidDataDirKind, types::*,
-        utils::unix_timestamp
-    };
+    use crate::{hl_fs::schemas::NodeFillsRow, types::*};
 
     #[test]
     fn derives_order_book_server_trade_shape() {
@@ -94,10 +86,14 @@ mod tests {
     fn matches_fills_across_updates() {
         let mut deriver = TradeDeriver::new();
 
-        deriver.construct_data(row(vec![ask_fill(false)])).unwrap();
+        deriver
+            .handle_data(HyperliquidDirData::NodeFills(vec![row(vec![ask_fill(false)])]))
+            .unwrap();
         assert_eq!(deriver.pending_fill_count(), 1);
 
-        deriver.construct_data(row(vec![bid_fill(true)])).unwrap();
+        deriver
+            .handle_data(HyperliquidDirData::NodeFills(vec![row(vec![bid_fill(true)])]))
+            .unwrap();
         assert_eq!(deriver.pending_fill_count(), 0);
     }
 
@@ -108,31 +104,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(trade.side, TradeSide::Ask);
-    }
-
-    #[test]
-    fn buffers_partial_lines_across_chunks() {
-        let mut deriver = TradeDeriver::new();
-        let row = concat!(
-            r#"{"local_time":"2025-06-24T02:56:36.172847427","block_time":"2025-06-24T02:56:36.172847427","block_number":1,"events":["#,
-            r#"["0xseller",{"coin":"BTC","px":"106296.0","sz":"0.00017","side":"A","time":1751430933565,"startPosition":"0.0","dir":"Open Short","closedPnl":"0.0","hash":"0xhash","oid":1,"crossed":true,"fee":"0.0","builderFee":null,"tid":293353986402527,"cloid":null,"feeToken":"USDC","builder":null,"twapId":null,"deployerFee":null}],"#,
-            r#"["0xbuyer",{"coin":"BTC","px":"106296.0","sz":"0.00017","side":"B","time":1751430933565,"startPosition":"0.0","dir":"Open Long","closedPnl":"0.0","hash":"0xhash","oid":2,"crossed":false,"fee":"0.0","builderFee":null,"tid":293353986402527,"cloid":null,"feeToken":"USDC","builder":null,"twapId":null,"deployerFee":null}]"#,
-            r#"]}"#,
-            "\n"
-        );
-        let split_idx = row.len() / 2;
-
-        let first_chunk = deriver
-            .handle_raw_data(fs_data(row[..split_idx].as_bytes().to_vec()))
-            .unwrap();
-        assert!(first_chunk.is_empty());
-
-        let second_chunk = deriver
-            .handle_raw_data(fs_data(row[split_idx..].as_bytes().to_vec()))
-            .unwrap();
-        assert_eq!(second_chunk.len(), 1);
-        assert_eq!(second_chunk[0].tid, 293353986402527);
-        assert_eq!(deriver.line_buffer.len(), 0);
     }
 
     fn row(events: Vec<NodeFillsFill>) -> NodeFillsRow {
@@ -174,18 +145,6 @@ mod tests {
             builder: None,
             twap_id: None,
             deployer_fee: None
-        }
-    }
-
-    fn fs_data(bytes: Vec<u8>) -> FsOutData {
-        let chunk_len = bytes.len();
-        FsOutData {
-            name: HyperliquidDataDirKind::NodeFills,
-            bytes,
-            path: "test-node-fills".to_string(),
-            chunk_len,
-            notification_received_at_ns: unix_timestamp().as_nanos(),
-            pipeline: Default::default()
         }
     }
 }

@@ -1,14 +1,17 @@
-mod trades;
 use eyre::Context;
-pub use trades::*;
 
-use crate::fs_handlers::types::FsOutData;
+mod node_fills;
+pub use node_fills::*;
 
-pub trait HyperliquidDataDeriver {
-    type RawType;
+use crate::{fs_handlers::types::FsOutData, hl_fs::HyperliquidDirData};
+
+pub trait HyperliquidDataParser: Default
+where
+    HyperliquidDirData: From<Vec<Self::ParsedType>>
+{
     type ParsedType;
 
-    fn handle_raw_data(&mut self, data: FsOutData) -> eyre::Result<Vec<Self::ParsedType>> {
+    fn handle_raw_data(&mut self, data: FsOutData) -> eyre::Result<HyperliquidDirData> {
         let path = data.path;
         let mut buffer = std::mem::take(self.line_buffer());
         buffer.extend_from_slice(&data.bytes);
@@ -39,13 +42,7 @@ pub trait HyperliquidDataDeriver {
                     }
                 };
 
-                match self.construct_data(parsed_value) {
-                    Ok(all_values) => out_data.extend(all_values),
-                    Err(err) => {
-                        result = Err(err);
-                        break;
-                    }
-                }
+                out_data.push(parsed_value);
             }
             line_start = newline_idx + 1;
             consumed_len = line_start;
@@ -56,12 +53,10 @@ pub trait HyperliquidDataDeriver {
         }
 
         *self.line_buffer() = buffer;
-        result.map(|_| out_data)
+        result.map(|_| out_data.into())
     }
 
     fn line_buffer(&mut self) -> &mut Vec<u8>;
 
-    fn parse_raw_type(data: &[u8]) -> eyre::Result<Self::RawType>;
-
-    fn construct_data(&mut self, data: Self::RawType) -> eyre::Result<Vec<Self::ParsedType>>;
+    fn parse_raw_type(data: &[u8]) -> eyre::Result<Self::ParsedType>;
 }

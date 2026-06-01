@@ -5,16 +5,16 @@ use std::{
     path::{Path, PathBuf}
 };
 
-use crate::hl_fs::HyperliquidDataDirKind;
+use crate::hl_fs::HyperliquidDirKind;
 
 pub struct ActiveDirectory {
-    pub name:        HyperliquidDataDirKind,
+    pub name:        HyperliquidDirKind,
     pub dir_path:    PathBuf,
     pub file_states: HashMap<PathBuf, FileTailState>
 }
 
 impl ActiveDirectory {
-    pub fn new(name: HyperliquidDataDirKind) -> eyre::Result<Self> {
+    pub fn new(name: HyperliquidDirKind) -> eyre::Result<Self> {
         let dir_path = name.dir_path();
         let mut file_states: HashMap<PathBuf, FileTailState> = HashMap::new();
 
@@ -81,7 +81,7 @@ impl FileTailState {
 
 #[derive(Debug, Clone)]
 pub struct FsOutData {
-    pub name: HyperliquidDataDirKind,
+    pub name: HyperliquidDirKind,
     pub bytes: Vec<u8>,
     pub path: String,
     pub chunk_len: usize,

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::hl_fs::schemas::NodeFillsFill;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Serialize, Deserialize, Hash)]
 pub struct Trade {
     pub coin:  String,
     pub side:  TradeSide,

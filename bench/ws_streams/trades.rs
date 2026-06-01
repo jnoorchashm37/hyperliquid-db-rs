@@ -7,8 +7,8 @@ use std::{
 };
 
 use hyperliquid_db::{
-    derivers::{HyperliquidDataDeriver, TradeDeriver},
-    hl_fs::HyperliquidDataDirKind,
+    derivers::{HyperliquidDataParser, TradeDeriver},
+    hl_fs::HyperliquidDirKind,
     types::Trade,
     utils::{NS_PER_MS, unix_timestamp}
 };
@@ -100,7 +100,7 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
 
             let rx_timestamp_ns = data.notification_received_at_ns;
             let trades = match data.name {
-                HyperliquidDataDirKind::NodeFills => deriver.handle_raw_data(data)?,
+                HyperliquidDirKind::NodeFills => deriver.handle_raw_data(data)?,
                 _ => unreachable!()
             };
 

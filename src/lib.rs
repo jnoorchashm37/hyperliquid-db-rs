@@ -1,16 +1,16 @@
 use std::sync::mpsc;
 
-pub mod derivers;
 pub mod types;
+
+mod data_manager;
+pub use data_manager::*;
 pub mod utils;
 
 use tracing::Level;
 
-use crate::{
-    derivers::{HyperliquidDataDeriver, TradeDeriver},
-    fs_handlers::DirectoryWatcher,
-    hl_fs::HyperliquidDataDirKind
-};
+pub mod processors;
+
+use crate::{fs_handlers::DirectoryWatcher, hl_fs::HyperliquidDirKind};
 
 pub mod fs_handlers;
 pub mod hl_fs;
@@ -23,19 +23,20 @@ pub fn run_stream() -> eyre::Result<()> {
     let (out_tx, out_rx) = mpsc::channel();
 
     tracing::info!("initializing watcher");
-    let watcher = DirectoryWatcher::new(HyperliquidDataDirKind::NodeFills, out_tx)?;
+    DirectoryWatcher::spawn(HyperliquidDirKind::NodeFills, out_tx)?;
     tracing::info!("initialized watcher");
-    watcher.run();
 
-    let mut deriver = TradeDeriver::new();
-    tracing::info!("created TradeDeriver watcher");
-    loop {
-        let data = out_rx.recv()??;
+    // let mut deriver = TradeDeriver::new();
+    // tracing::info!("created TradeDeriver watcher");
+    // loop {
+    //     let data = out_rx.recv()??;
 
-        let out = match data.name {
-            HyperliquidDataDirKind::NodeFills => deriver.handle_raw_data(data)?,
-            _ => unreachable!()
-        };
-        tracing::info!("{out:?}");
-    }
+    //     let out = match data.name {
+    //         HyperliquidDirKind::NodeFills => deriver.handle_raw_data(data)?,
+    //         _ => unreachable!()
+    //     };
+    //     tracing::info!("{out:?}");
+    // }
+
+    Ok(())
 }

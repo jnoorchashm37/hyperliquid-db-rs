@@ -9,40 +9,54 @@ use inotify::{EventMask, Inotify, WatchDescriptor, WatchMask};
 
 use crate::{
     fs_handlers::types::{ActiveDirectory, FileTailState, FsOutData, FsPipelineTimestamps},
-    hl_fs::HyperliquidDataDirKind,
+    hl_fs::{
+        HyperliquidDirData, HyperliquidDirKind,
+        parsers::{HyperliquidDataParser, NodeFillsParser}
+    },
     utils::unix_timestamp
 };
 
 pub struct DirectoryWatcher {
+    name:       HyperliquidDirKind,
     directory:  ActiveDirectory,
     notifier:   Inotify,
     watch_dirs: HashMap<WatchDescriptor, PathBuf>,
-    out_tx:     mpsc::Sender<eyre::Result<FsOutData>>
+    out_tx:     mpsc::Sender<eyre::Result<HyperliquidDirData>>
 }
 
 impl DirectoryWatcher {
-    pub fn new(
-        name: HyperliquidDataDirKind,
-        out_tx: mpsc::Sender<eyre::Result<FsOutData>>
-    ) -> eyre::Result<Self> {
+    pub fn spawn(
+        name: HyperliquidDirKind,
+        out_tx: mpsc::Sender<eyre::Result<HyperliquidDirData>>
+    ) -> eyre::Result<()> {
         let directory = ActiveDirectory::new(name)?;
         let notifier = Inotify::init()?;
-        let mut watcher = Self { directory, notifier, watch_dirs: HashMap::new(), out_tx };
+        let mut watcher = Self { name, directory, notifier, watch_dirs: HashMap::new(), out_tx };
         watcher.add_directory_watches_recursive(&watcher.directory.dir_path.clone())?;
+        watcher.run();
 
         Ok(watcher)
     }
 
     pub fn run(mut self) {
         std::thread::spawn(move || {
-            if let Err(error) = self.run_safe() {
+            let result = match self.name {
+                HyperliquidDirKind::NodeFills => self.run_safe::<NodeFillsParser>()
+            };
+            if let Err(error) = result {
                 tracing::error!("error running filesystem watcher: {error:?}");
+                self.out_tx.send(Err(error)).unwrap();
+            } else {
+                let error = eyre::eyre!("filesystem watcher ended prematurely");
+                tracing::error!(?error);
                 self.out_tx.send(Err(error)).unwrap();
             }
         });
     }
 
-    fn run_safe(&mut self) -> eyre::Result<()> {
+    fn run_safe<P: HyperliquidDataParser>(&mut self) -> eyre::Result<()> {
+        let mut parser = P::default();
+
         let mut event_buf = [0_u8; 16 * 1024];
 
         loop {
@@ -81,7 +95,7 @@ impl DirectoryWatcher {
                     continue;
                 }
 
-                self.drain_file(&path, notification_batch_received_at_ns)?;
+                self.drain_file(&mut parser, &path, notification_batch_received_at_ns)?;
             }
         }
     }
@@ -115,6 +129,7 @@ impl DirectoryWatcher {
 
     fn drain_new_files_recursive(
         &mut self,
+        parser: &mut impl HyperliquidDataParser,
         dir_path: &Path,
         notification_batch_received_at_ns: u128
     ) -> eyre::Result<()> {
@@ -130,7 +145,7 @@ impl DirectoryWatcher {
             if file_type.is_dir() {
                 self.drain_new_files_recursive(&path, notification_batch_received_at_ns)?;
             } else if file_type.is_file() {
-                self.drain_file(&path, notification_batch_received_at_ns)?;
+                self.drain_file(parser, &path, notification_batch_received_at_ns)?;
             }
         }
 
@@ -139,6 +154,7 @@ impl DirectoryWatcher {
 
     fn drain_file(
         &mut self,
+        parser: &mut impl HyperliquidDataParser,
         path: &Path,
         notification_batch_received_at_ns: u128
     ) -> eyre::Result<()> {
@@ -174,7 +190,7 @@ impl DirectoryWatcher {
 
             for chunk in chunks {
                 let channel_send_started_at_ns = unix_timestamp().as_nanos();
-                out_tx.send(Ok(FsOutData {
+                let raw_data = FsOutData {
                     name,
                     bytes: chunk.bytes,
                     path: path.clone(),
@@ -189,7 +205,11 @@ impl DirectoryWatcher {
                         drain_file_finished_at_ns,
                         channel_send_started_at_ns
                     }
-                }))?;
+                };
+
+                let data = parser.handle_raw_data(raw_data)?;
+
+                out_tx.send(Ok(data))?;
             }
         }
 
@@ -211,7 +231,7 @@ mod tests {
     fn test_directory_watcher() {
         let (tx, rx) = mpsc::channel();
 
-        let watcher = DirectoryWatcher::new(HyperliquidDataDirKind::NodeFills, tx).unwrap();
+        let watcher = DirectoryWatcher::new(HyperliquidDirKind::NodeFills, tx).unwrap();
         watcher.run();
 
         loop {

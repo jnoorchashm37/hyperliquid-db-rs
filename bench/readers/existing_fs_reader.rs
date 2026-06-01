@@ -8,13 +8,13 @@ use std::{
 
 use hyperliquid_db::{
     fs_handlers::types::{FsOutData, FsPipelineTimestamps},
-    hl_fs::HyperliquidDataDirKind,
+    hl_fs::HyperliquidDirKind,
     utils::unix_timestamp
 };
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 
 pub fn spawn_file_reader(
-    name: HyperliquidDataDirKind,
+    name: HyperliquidDirKind,
     dir_path: &Path
 ) -> eyre::Result<mpsc::Receiver<eyre::Result<FsOutData>>> {
     let directory = dir_path.join(name.to_string()).canonicalize()?;
@@ -41,7 +41,7 @@ pub fn spawn_file_reader(
 }
 
 struct ExistingFsReader {
-    name:         HyperliquidDataDirKind,
+    name:         HyperliquidDirKind,
     current_file: Option<File>,
     current_path: Option<PathBuf>,
     out_tx:       mpsc::Sender<eyre::Result<FsOutData>>

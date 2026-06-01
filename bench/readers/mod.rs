@@ -14,9 +14,9 @@ use std::{
 use eyre::WrapErr;
 use hyperliquid_db::{
     HYPERLIQUID_DATA_DIR,
-    derivers::{HyperliquidDataDeriver, TradeDeriver},
+    derivers::{HyperliquidDataParser, TradeDeriver},
     fs_handlers::types::FsOutData,
-    hl_fs::HyperliquidDataDirKind,
+    hl_fs::HyperliquidDirKind,
     utils::{NS_PER_MS, NS_PER_SEC, unix_timestamp}
 };
 
@@ -27,7 +27,7 @@ const BENCHMARK_READY_MS: u64 = 100;
 const BENCHMARK_RECV_TIMEOUT_MS: u64 = 100_000;
 
 type SpawnReader =
-    fn(HyperliquidDataDirKind, &Path) -> eyre::Result<mpsc::Receiver<eyre::Result<FsOutData>>>;
+    fn(HyperliquidDirKind, &Path) -> eyre::Result<mpsc::Receiver<eyre::Result<FsOutData>>>;
 
 pub fn run_fs_readers_bench() {
     if let Err(err) = run() {
@@ -170,7 +170,7 @@ fn spawn_reader_collector(
     spawn_reader: SpawnReader,
     directory: &Path
 ) -> eyre::Result<ReaderCollector> {
-    let rx = spawn_reader(HyperliquidDataDirKind::NodeFills, directory)?;
+    let rx = spawn_reader(HyperliquidDirKind::NodeFills, directory)?;
     let (command_tx, command_rx) = mpsc::channel();
     let (result_tx, result_rx) = mpsc::channel();
 
