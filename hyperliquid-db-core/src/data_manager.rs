@@ -1,14 +1,11 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, mpsc}
-};
+use std::sync::{Arc, mpsc};
 
 use itertools::Itertools;
 use tokio::sync::broadcast;
 
 use crate::{
     fs_handlers::DirectoryWatcher,
-    hl_fs::{HyperliquidDirData, HyperliquidDirKind},
+    hl_fs::HyperliquidDirData,
     processors::{HyperliquidDataProcessorHandle, TradeDeriver},
     types::{HyperliquidData, HyperliquidDataKind}
 };

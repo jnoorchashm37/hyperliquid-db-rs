@@ -1,5 +1,5 @@
 mod trades;
-pub use trades::*;
+pub use trades::TradeDeriver;
 
 use crate::{hl_fs::HyperliquidDirData, types::HyperliquidData};
 

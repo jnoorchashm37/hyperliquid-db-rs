@@ -49,9 +49,7 @@ impl TradeDeriver {
 
 impl HyperliquidDataProcessorHandle for TradeDeriver {
     fn handle_data(&mut self, data: &HyperliquidDirData) -> eyre::Result<Option<HyperliquidData>> {
-        let fills = match data {
-            HyperliquidDirData::NodeFills(data) => data
-        };
+        let HyperliquidDirData::NodeFills(fills) = data;
 
         let mut trades = Vec::new();
         for fill in fills.iter().flat_map(|fill| fill.events.clone()) {
@@ -67,8 +65,15 @@ impl HyperliquidDataProcessorHandle for TradeDeriver {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
-    use crate::{hl_fs::schemas::NodeFillsRow, types::*};
+    use super::TradeDeriver;
+    use crate::{
+        hl_fs::{
+            HyperliquidDirData,
+            schemas::{NodeFillsFill, NodeFillsRow, NodeFillsSide}
+        },
+        processors::HyperliquidDataProcessorHandle,
+        types::{PendingTrade, TradeSide}
+    };
 
     #[test]
     fn derives_order_book_server_trade_shape() {

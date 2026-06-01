@@ -1,19 +1,8 @@
 use std::sync::Arc;
 
-use axum::{
-    Router,
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    response::IntoResponse,
-    routing::get
-};
-use hyperliquid_db_core::{
-    HyperliquidDataManager,
-    processors::TradeDeriver,
-    types::{HyperliquidData, HyperliquidDataKind, Trade}
-};
-use serde::Serialize;
+use axum::extract::ws::WebSocket;
+use hyperliquid_db_core::types::{HyperliquidData, HyperliquidDataKind};
 use tokio::sync::broadcast::Sender;
-use tracing::Level;
 
 use crate::{
     HyperliquidDataClient,
@@ -37,8 +26,7 @@ impl WsHandler {
     }
 
     pub async fn run(mut self, mut websocket: WebSocket) {
-        let mut client =
-            HyperliquidDataClient::new(self.channel, self.data_kind, self.data_tx.subscribe());
+        let mut client = HyperliquidDataClient::new(self.data_kind, self.data_tx.subscribe());
         loop {
             match client.recv().await {
                 Ok(Some(data)) => {

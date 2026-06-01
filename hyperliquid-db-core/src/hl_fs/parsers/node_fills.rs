@@ -26,10 +26,10 @@ impl HyperliquidDataParser for NodeFillsParser {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
+    use super::NodeFillsParser;
     use crate::{
         fs_handlers::types::FsOutData,
-        hl_fs::{HyperliquidDirData, HyperliquidDirKind},
+        hl_fs::{HyperliquidDirData, HyperliquidDirKind, parsers::HyperliquidDataParser},
         utils::unix_timestamp
     };
 
@@ -46,19 +46,15 @@ mod tests {
         let split_idx = row.len() / 2;
 
         let first_chunk = deriver
-            .handle_raw_data(fs_data(row[..split_idx].as_bytes().to_vec()))
+            .handle_raw_data(fs_data(row.as_bytes()[..split_idx].to_vec()))
             .unwrap();
-        let first_chunk = match first_chunk {
-            HyperliquidDirData::NodeFills(d) => d
-        };
+        let HyperliquidDirData::NodeFills(first_chunk) = first_chunk;
         assert!(first_chunk.is_empty());
 
         let second_chunk = deriver
-            .handle_raw_data(fs_data(row[split_idx..].as_bytes().to_vec()))
+            .handle_raw_data(fs_data(row.as_bytes()[split_idx..].to_vec()))
             .unwrap();
-        let second_chunk = match second_chunk {
-            HyperliquidDirData::NodeFills(d) => d
-        };
+        let HyperliquidDirData::NodeFills(second_chunk) = second_chunk;
         assert_eq!(second_chunk.len(), 1);
         assert_eq!(second_chunk[0].events[0].tid, 293353986402527);
         assert_eq!(deriver.line_buffer.len(), 0);

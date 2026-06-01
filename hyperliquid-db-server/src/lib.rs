@@ -1,10 +1,10 @@
 pub mod builder;
 mod ws_manager;
-pub use ws_manager::*;
+pub use ws_manager::WsHandler;
 mod data_client;
 pub mod route;
 
-pub use data_client::*;
+pub use data_client::HyperliquidDataClient;
 use hyperliquid_db_core::types::HyperliquidDataKind;
 use tracing::Level;
 

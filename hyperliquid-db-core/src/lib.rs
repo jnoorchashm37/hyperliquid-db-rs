@@ -1,7 +1,7 @@
 pub mod types;
 
 mod data_manager;
-pub use data_manager::*;
+pub use data_manager::HyperliquidDataManager;
 pub mod utils;
 
 pub mod processors;

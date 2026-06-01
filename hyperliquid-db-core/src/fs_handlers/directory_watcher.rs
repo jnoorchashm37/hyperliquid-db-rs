@@ -225,7 +225,10 @@ struct PendingFsChunk {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::mpsc;
+
+    use super::DirectoryWatcher;
+    use crate::hl_fs::HyperliquidDirKind;
 
     #[test]
     fn test_directory_watcher() {
