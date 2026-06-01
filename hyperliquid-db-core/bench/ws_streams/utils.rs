@@ -1,15 +1,13 @@
 use std::{
     io,
     net::TcpStream,
-    path::Path,
     sync::mpsc::{self, Receiver},
     time::Duration
 };
 
 use hyperliquid_db_core::{
-    HYPERLIQUID_DATA_DIR,
-    fs_handlers::{DirectoryWatcher, types::FsOutData},
-    hl_fs::{HyperliquidDirData, HyperliquidDirDataWithMeta, HyperliquidDirKind}
+    fs_handlers::DirectoryWatcher,
+    hl_fs::{HyperliquidDirDataWithMeta, HyperliquidDirKind}
 };
 use serde_json::json;
 use tungstenite::{Message, WebSocket, connect, stream::MaybeTlsStream};

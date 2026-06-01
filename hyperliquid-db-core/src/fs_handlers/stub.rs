@@ -1,15 +1,15 @@
 use std::sync::mpsc;
 
-use crate::hl_fs::{HyperliquidDirData, HyperliquidDirKind};
+use crate::hl_fs::{HyperliquidDirDataWithMeta, HyperliquidDirKind};
 
 pub struct DirectoryWatcher {
-    out_tx: mpsc::Sender<eyre::Result<HyperliquidDirData>>
+    out_tx: mpsc::Sender<eyre::Result<HyperliquidDirDataWithMeta>>
 }
 
 impl DirectoryWatcher {
     pub fn spawn(
         _name: HyperliquidDirKind,
-        out_tx: mpsc::Sender<eyre::Result<HyperliquidDirData>>
+        out_tx: mpsc::Sender<eyre::Result<HyperliquidDirDataWithMeta>>
     ) -> eyre::Result<()> {
         let watcher = Self { out_tx };
         watcher.run();

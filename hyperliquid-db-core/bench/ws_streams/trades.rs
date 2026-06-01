@@ -10,7 +10,7 @@ use std::{
 };
 
 use hyperliquid_db_core::{
-    hl_fs::parsers::{HyperliquidDataParser, NodeFillsParser},
+    hl_fs::parsers::NodeFillsParser,
     processors::{HyperliquidDataProcessorHandle, TradeDeriver},
     types::{HyperliquidData, Trade},
     utils::{NS_PER_MS, unix_timestamp}
@@ -96,7 +96,6 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
         let implemented_stream = spawn_hl_watcher()?;
         let mut cache = TradeCache::new("file reader");
 
-        let mut parser = NodeFillsParser::new();
         let mut deriver = TradeDeriver::new();
 
         loop {
