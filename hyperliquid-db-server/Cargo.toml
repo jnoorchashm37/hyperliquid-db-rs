@@ -8,6 +8,7 @@ exclude.workspace = true
 
 [dependencies]
 hyperliquid-db-core.workspace = true
+axum.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

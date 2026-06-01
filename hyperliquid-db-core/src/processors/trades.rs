@@ -48,13 +48,13 @@ impl TradeDeriver {
 }
 
 impl HyperliquidDataProcessorHandle for TradeDeriver {
-    fn handle_data(&mut self, data: HyperliquidDirData) -> eyre::Result<Option<HyperliquidData>> {
+    fn handle_data(&mut self, data: &HyperliquidDirData) -> eyre::Result<Option<HyperliquidData>> {
         let fills = match data {
             HyperliquidDirData::NodeFills(data) => data
         };
 
         let mut trades = Vec::new();
-        for fill in fills.into_iter().flat_map(|fill| fill.events) {
+        for fill in fills.iter().flat_map(|fill| fill.events.clone()) {
             if let Some(trade) = self.new_fill(fill)? {
                 trades.push(trade);
             }
@@ -87,12 +87,12 @@ mod tests {
         let mut deriver = TradeDeriver::new();
 
         deriver
-            .handle_data(HyperliquidDirData::NodeFills(vec![row(vec![ask_fill(false)])]))
+            .handle_data(&HyperliquidDirData::NodeFills(vec![row(vec![ask_fill(false)])]))
             .unwrap();
         assert_eq!(deriver.pending_fill_count(), 1);
 
         deriver
-            .handle_data(HyperliquidDirData::NodeFills(vec![row(vec![bid_fill(true)])]))
+            .handle_data(&HyperliquidDirData::NodeFills(vec![row(vec![bid_fill(true)])]))
             .unwrap();
         assert_eq!(deriver.pending_fill_count(), 0);
     }

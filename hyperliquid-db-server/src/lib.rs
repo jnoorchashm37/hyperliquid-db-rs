@@ -1,30 +1,27 @@
-use std::sync::mpsc;
+pub mod builder;
+mod ws_manager;
+pub use ws_manager::*;
+mod data_client;
+pub mod route;
 
-use hyperliquid_db_core::{fs_handlers::DirectoryWatcher, hl_fs::HyperliquidDirKind};
+pub use data_client::*;
+use hyperliquid_db_core::types::HyperliquidDataKind;
 use tracing::Level;
+
+use crate::builder::HyperliquidWebsocketBuilder;
 
 pub mod utils;
 
-pub fn run_server() -> eyre::Result<()> {
+const DEFAULT_RPC_ADDR: &str = "127.0.0.1:3000";
+
+pub async fn run_server() -> eyre::Result<()> {
     crate::utils::init_logging(Level::DEBUG);
 
-    let (out_tx, out_rx) = mpsc::channel();
+    let app = HyperliquidWebsocketBuilder::new(HyperliquidDataKind::all()).build()?;
 
-    tracing::info!("initializing watcher");
-    DirectoryWatcher::spawn(HyperliquidDirKind::NodeFills, out_tx)?;
-    tracing::info!("initialized watcher");
-
-    // let mut deriver = TradeDeriver::new();
-    // tracing::info!("created TradeDeriver watcher");
-    // loop {
-    //     let data = out_rx.recv()??;
-
-    //     let out = match data.name {
-    //         HyperliquidDirKind::NodeFills => deriver.handle_raw_data(data)?,
-    //         _ => unreachable!()
-    //     };
-    //     tracing::info!("{out:?}");
-    // }
+    let listener = tokio::net::TcpListener::bind(DEFAULT_RPC_ADDR).await?;
+    tracing::info!(addr = DEFAULT_RPC_ADDR, "running rpc server");
+    axum::serve(listener, app).await?;
 
     Ok(())
 }

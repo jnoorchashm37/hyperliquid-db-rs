@@ -1,6 +1,7 @@
 pub mod types;
 
-pub mod clients;
+mod data_manager;
+pub use data_manager::*;
 pub mod utils;
 
 pub mod processors;

@@ -1,4 +1,5 @@
 mod trades;
+use serde::{Deserialize, Serialize};
 pub use trades::*;
 mod all_mids;
 pub use all_mids::*;
@@ -6,9 +7,17 @@ use strum::IntoEnumIterator;
 
 use crate::hl_fs::HyperliquidDirKind;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum HyperliquidData {
     Trades(Vec<Trade>)
+}
+
+impl HyperliquidData {
+    pub fn kind(&self) -> HyperliquidDataKind {
+        match self {
+            HyperliquidData::Trades(_) => HyperliquidDataKind::Trades
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter)]
