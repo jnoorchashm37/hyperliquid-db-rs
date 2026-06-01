@@ -5,7 +5,7 @@ use crate::{
         HyperliquidDirData,
         schemas::{NodeFillsFill, NodeFillsSide}
     },
-    processors::HyperliquidDataProcessor,
+    processors::HyperliquidDataProcessorHandle,
     types::{HyperliquidData, PendingTrade, Trade}
 };
 
@@ -47,7 +47,7 @@ impl TradeDeriver {
     }
 }
 
-impl HyperliquidDataProcessor for TradeDeriver {
+impl HyperliquidDataProcessorHandle for TradeDeriver {
     fn handle_data(&mut self, data: HyperliquidDirData) -> eyre::Result<Option<HyperliquidData>> {
         let fills = match data {
             HyperliquidDirData::NodeFills(data) => data
