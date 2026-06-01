@@ -9,7 +9,7 @@ use std::{
     time::Duration
 };
 
-use hyperliquid_db::{
+use hyperliquid_db_core::{
     hl_fs::parsers::{HyperliquidDataParser, NodeFillsParser},
     processors::{HyperliquidDataProcessorHandle, TradeDeriver},
     types::{HyperliquidData, Trade},

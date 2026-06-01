@@ -1,6 +1,6 @@
 use std::{io, net::TcpStream, path::Path, sync::mpsc::Receiver, time::Duration};
 
-use hyperliquid_db::{
+use hyperliquid_db_core::{
     HYPERLIQUID_DATA_DIR, fs_handlers::types::FsOutData, hl_fs::HyperliquidDirKind
 };
 use serde_json::json;

@@ -12,7 +12,7 @@ use std::{
 };
 
 use eyre::WrapErr;
-use hyperliquid_db::{
+use hyperliquid_db_core::{
     HYPERLIQUID_DATA_DIR,
     fs_handlers::types::FsOutData,
     hl_fs::{

@@ -6,7 +6,7 @@ use std::{
     thread
 };
 
-use hyperliquid_db::{
+use hyperliquid_db_core::{
     fs_handlers::types::{FileTailState, FsOutData, FsPipelineTimestamps},
     hl_fs::HyperliquidDirKind,
     utils::unix_timestamp
