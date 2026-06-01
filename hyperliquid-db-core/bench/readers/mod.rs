@@ -14,9 +14,13 @@ use std::{
 use eyre::WrapErr;
 use hyperliquid_db::{
     HYPERLIQUID_DATA_DIR,
-    derivers::{HyperliquidDataParser, TradeDeriver},
     fs_handlers::types::FsOutData,
-    hl_fs::HyperliquidDirKind,
+    hl_fs::{
+        HyperliquidDirData, HyperliquidDirKind,
+        parsers::{HyperliquidDataParser, NodeFillsParser}
+    },
+    processors::{HyperliquidDataProcessorHandle, TradeDeriver},
+    types::HyperliquidData,
     utils::{NS_PER_MS, NS_PER_SEC, unix_timestamp}
 };
 
@@ -354,7 +358,7 @@ impl NodeFillsRowProfiler {
     }
 
     fn profile_row(&mut self, line: &[u8], chunk: &FsOutData) -> eyre::Result<StageSamples> {
-        let row = TradeDeriver::parse_raw_type(line).wrap_err_with(|| {
+        let row = NodeFillsParser::parse_raw_type(line).wrap_err_with(|| {
             format!("failed to parse node_fills_streaming row from {}", chunk.path)
         })?;
         let parsed_at_ns = unix_timestamp().as_nanos();
@@ -363,7 +367,13 @@ impl NodeFillsRowProfiler {
         let block_time_ns = parse_node_timestamp_ns(&row.block_time)
             .wrap_err_with(|| format!("failed to parse block_time {}", row.block_time))?;
 
-        let trades = self.deriver.construct_data(row)?;
+        let trades = match self
+            .deriver
+            .handle_data(&HyperliquidDirData::NodeFills(vec![row]))?
+        {
+            Some(HyperliquidData::Trades(trades)) => trades,
+            None => Vec::new()
+        };
         let derived_at_ns = unix_timestamp().as_nanos();
 
         let mut stages = StageSamples::default();

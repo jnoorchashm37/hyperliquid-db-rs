@@ -5,6 +5,8 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
+mod raw_fs_reader;
+#[cfg(target_os = "linux")]
 mod ws_streams;
 
 #[cfg(target_os = "linux")]

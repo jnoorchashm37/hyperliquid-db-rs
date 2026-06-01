@@ -5,6 +5,8 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
+mod raw_fs_reader;
+#[cfg(target_os = "linux")]
 mod readers;
 
 #[cfg(target_os = "linux")]

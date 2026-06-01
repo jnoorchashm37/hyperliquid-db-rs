@@ -1,13 +1,7 @@
-use std::{
-    io,
-    net::TcpStream,
-    sync::mpsc::{self, Receiver},
-    time::Duration
-};
+use std::{io, net::TcpStream, path::Path, sync::mpsc::Receiver, time::Duration};
 
 use hyperliquid_db::{
-    fs_handlers::{DirectoryWatcher, types::FsOutData},
-    hl_fs::HyperliquidDirKind
+    HYPERLIQUID_DATA_DIR, fs_handlers::types::FsOutData, hl_fs::HyperliquidDirKind
 };
 use serde_json::json;
 use tungstenite::{Message, WebSocket, connect, stream::MaybeTlsStream};
@@ -47,8 +41,8 @@ pub fn set_hl_websocket_read_timeout(
 }
 
 pub fn spawn_hl_watcher() -> eyre::Result<Receiver<eyre::Result<FsOutData>>> {
-    let (out_tx, out_rx) = mpsc::channel();
-    let watcher = DirectoryWatcher::new(HyperliquidDirKind::NodeFills, out_tx)?;
-    watcher.run();
-    Ok(out_rx)
+    crate::raw_fs_reader::spawn_file_reader(
+        HyperliquidDirKind::NodeFills,
+        Path::new(HYPERLIQUID_DATA_DIR)
+    )
 }

@@ -1,15 +1,18 @@
 use std::{
     collections::HashMap,
     io::ErrorKind,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::RecvTimeoutError
+    },
     thread::JoinHandle,
     time::Duration
 };
 
 use hyperliquid_db::{
-    derivers::{HyperliquidDataParser, TradeDeriver},
-    hl_fs::HyperliquidDirKind,
-    types::Trade,
+    hl_fs::parsers::{HyperliquidDataParser, NodeFillsParser},
+    processors::{HyperliquidDataProcessorHandle, TradeDeriver},
+    types::{HyperliquidData, Trade},
     utils::{NS_PER_MS, unix_timestamp}
 };
 use serde::Deserialize;
@@ -93,15 +96,30 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
         let implemented_stream = spawn_hl_watcher()?;
         let mut cache = TradeCache::new("file reader");
 
+        let mut parser = NodeFillsParser::new();
         let mut deriver = TradeDeriver::new();
 
         loop {
-            let data = implemented_stream.recv()??;
+            let data = match implemented_stream
+                .recv_timeout(Duration::from_millis(PUBLIC_WS_READ_TIMEOUT_MS))
+            {
+                Ok(data) => data?,
+                Err(RecvTimeoutError::Timeout) => {
+                    if !IS_RUNNING.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(eyre::eyre!("implemented stream channel disconnected"));
+                }
+            };
 
             let rx_timestamp_ns = data.notification_received_at_ns;
-            let trades = match data.name {
-                HyperliquidDirKind::NodeFills => deriver.handle_raw_data(data)?,
-                _ => unreachable!()
+            let parsed_data = parser.handle_raw_data(data)?;
+            let trades = match deriver.handle_data(&parsed_data)? {
+                Some(HyperliquidData::Trades(trades)) => trades,
+                None => Vec::new()
             };
 
             cache.new_trades(trades, rx_timestamp_ns);
