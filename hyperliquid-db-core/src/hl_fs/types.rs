@@ -1,12 +1,19 @@
 use std::{
     fmt,
     path::{Path, PathBuf},
-    str::FromStr
+    str::FromStr,
+    sync::Arc
 };
 
 use strum::IntoEnumIterator;
 
-use crate::{HYPERLIQUID_DATA_DIR, hl_fs::schemas::NodeFillsRow};
+use crate::{HYPERLIQUID_DATA_DIR, fs_handlers::types::FsOutData, hl_fs::schemas::NodeFillsRow};
+
+#[derive(Debug, Clone)]
+pub struct HyperliquidDirDataWithMeta {
+    pub data:          HyperliquidDirData,
+    pub pipeline_meta: Arc<FsOutData>
+}
 
 #[derive(Debug, Clone, PartialOrd, PartialEq)]
 pub enum HyperliquidDirData {

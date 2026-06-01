@@ -5,13 +5,13 @@ use tokio::sync::broadcast;
 
 use crate::{
     fs_handlers::DirectoryWatcher,
-    hl_fs::HyperliquidDirData,
+    hl_fs::{HyperliquidDirData, HyperliquidDirDataWithMeta},
     processors::{HyperliquidDataProcessorHandle, TradeDeriver},
     types::{HyperliquidData, HyperliquidDataKind}
 };
 
 pub struct HyperliquidDataManager {
-    raw_data_rx:    mpsc::Receiver<eyre::Result<HyperliquidDirData>>,
+    raw_data_rx:    mpsc::Receiver<eyre::Result<HyperliquidDirDataWithMeta>>,
     processors:     Vec<Box<dyn HyperliquidDataProcessorHandle>>,
     parsed_data_tx: broadcast::Sender<Arc<eyre::Result<HyperliquidData>>>
 }
@@ -75,7 +75,7 @@ impl HyperliquidDataManager {
     fn run_safe(&mut self) -> eyre::Result<()> {
         loop {
             let data = self.raw_data_rx.recv()??;
-            self.send_data(data)?;
+            self.send_data(data.data)?;
         }
     }
 

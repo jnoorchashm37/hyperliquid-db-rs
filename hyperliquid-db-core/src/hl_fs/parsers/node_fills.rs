@@ -48,13 +48,13 @@ mod tests {
         let first_chunk = deriver
             .handle_raw_data(fs_data(row.as_bytes()[..split_idx].to_vec()))
             .unwrap();
-        let HyperliquidDirData::NodeFills(first_chunk) = first_chunk;
+        let HyperliquidDirData::NodeFills(first_chunk) = first_chunk.data;
         assert!(first_chunk.is_empty());
 
         let second_chunk = deriver
             .handle_raw_data(fs_data(row.as_bytes()[split_idx..].to_vec()))
             .unwrap();
-        let HyperliquidDirData::NodeFills(second_chunk) = second_chunk;
+        let HyperliquidDirData::NodeFills(second_chunk) = second_chunk.data;
         assert_eq!(second_chunk.len(), 1);
         assert_eq!(second_chunk[0].events[0].tid, 293353986402527);
         assert_eq!(deriver.line_buffer.len(), 0);

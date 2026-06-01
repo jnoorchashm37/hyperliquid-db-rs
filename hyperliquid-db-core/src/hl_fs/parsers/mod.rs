@@ -1,9 +1,14 @@
+use std::sync::Arc;
+
 use eyre::Context;
 
 mod node_fills;
 pub use node_fills::NodeFillsParser;
 
-use crate::{fs_handlers::types::FsOutData, hl_fs::HyperliquidDirData};
+use crate::{
+    fs_handlers::types::FsOutData,
+    hl_fs::{HyperliquidDirData, types::HyperliquidDirDataWithMeta}
+};
 
 pub trait HyperliquidDataParser: Default
 where
@@ -11,7 +16,8 @@ where
 {
     type ParsedType;
 
-    fn handle_raw_data(&mut self, data: FsOutData) -> eyre::Result<HyperliquidDirData> {
+    fn handle_raw_data(&mut self, data: FsOutData) -> eyre::Result<HyperliquidDirDataWithMeta> {
+        let arced_data = Arc::new(data.clone());
         let path = data.path;
         let mut buffer = std::mem::take(self.line_buffer());
         buffer.extend_from_slice(&data.bytes);
@@ -53,7 +59,10 @@ where
         }
 
         *self.line_buffer() = buffer;
-        result.map(|_| out_data.into())
+        result.map(|_| HyperliquidDirDataWithMeta {
+            data:          out_data.into(),
+            pipeline_meta: arced_data.clone()
+        })
     }
 
     fn line_buffer(&mut self) -> &mut Vec<u8>;

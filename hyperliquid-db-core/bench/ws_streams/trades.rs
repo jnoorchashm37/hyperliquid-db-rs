@@ -115,9 +115,8 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
                 }
             };
 
-            let rx_timestamp_ns = data.notification_received_at_ns;
-            let parsed_data = parser.handle_raw_data(data)?;
-            let trades = match deriver.handle_data(&parsed_data)? {
+            let rx_timestamp_ns = data.pipeline_meta.notification_received_at_ns;
+            let trades = match deriver.handle_data(&data.data)? {
                 Some(HyperliquidData::Trades(trades)) => trades,
                 None => Vec::new()
             };

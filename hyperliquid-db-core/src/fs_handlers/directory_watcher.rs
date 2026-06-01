@@ -10,7 +10,7 @@ use inotify::{EventMask, Inotify, WatchDescriptor, WatchMask};
 use crate::{
     fs_handlers::types::{ActiveDirectory, FileTailState, FsOutData, FsPipelineTimestamps},
     hl_fs::{
-        HyperliquidDirData, HyperliquidDirKind,
+        HyperliquidDirData, HyperliquidDirDataWithMeta, HyperliquidDirKind,
         parsers::{HyperliquidDataParser, NodeFillsParser}
     },
     utils::unix_timestamp
@@ -21,13 +21,13 @@ pub struct DirectoryWatcher {
     directory:  ActiveDirectory,
     notifier:   Inotify,
     watch_dirs: HashMap<WatchDescriptor, PathBuf>,
-    out_tx:     mpsc::Sender<eyre::Result<HyperliquidDirData>>
+    out_tx:     mpsc::Sender<eyre::Result<HyperliquidDirDataWithMeta>>
 }
 
 impl DirectoryWatcher {
     pub fn spawn(
         name: HyperliquidDirKind,
-        out_tx: mpsc::Sender<eyre::Result<HyperliquidDirData>>
+        out_tx: mpsc::Sender<eyre::Result<HyperliquidDirDataWithMeta>>
     ) -> eyre::Result<()> {
         let directory = ActiveDirectory::new(name)?;
         let notifier = Inotify::init()?;
