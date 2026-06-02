@@ -45,11 +45,11 @@ impl DirectoryWatcher {
             };
             if let Err(error) = result {
                 tracing::error!("error running filesystem watcher: {error:?}");
-                self.out_tx.send(Err(error)).unwrap();
+                let _ = self.out_tx.send(Err(error));
             } else {
                 let error = eyre::eyre!("filesystem watcher ended prematurely");
                 tracing::error!(?error);
-                self.out_tx.send(Err(error)).unwrap();
+                let _ = self.out_tx.send(Err(error));
             }
         });
     }
