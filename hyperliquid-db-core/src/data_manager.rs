@@ -6,7 +6,7 @@ use tokio::sync::broadcast;
 use crate::{
     fs_handlers::DirectoryWatcher,
     hl_fs::HyperliquidDirDataWithMeta,
-    processors::{HyperliquidDataProcessorHandle, TradeDeriver},
+    processors::{HyperliquidDataProcessorHandle, L4BookDeriver, TradeDeriver},
     types::{HyperliquidData, HyperliquidDataKind}
 };
 
@@ -99,6 +99,6 @@ impl HyperliquidDataManager {
 fn kind_to_processor(kind: HyperliquidDataKind) -> Box<dyn HyperliquidDataProcessorHandle> {
     match kind {
         HyperliquidDataKind::Trades => Box::new(TradeDeriver::new()),
-        HyperliquidDataKind::L4Book => todo!()
+        HyperliquidDataKind::L4Book => Box::new(L4BookDeriver::new())
     }
 }
