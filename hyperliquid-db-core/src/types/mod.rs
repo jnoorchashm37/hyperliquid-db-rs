@@ -2,8 +2,8 @@ mod trades;
 
 use serde::{Deserialize, Serialize};
 pub use trades::{PendingTrade, Trade, TradeSide};
-mod all_mids;
-pub use all_mids::AllMids;
+mod l2_orderbook;
+pub use l2_orderbook::L2Book;
 use strum::IntoEnumIterator;
 
 use crate::{fs_handlers::types::FsOutData, hl_fs::HyperliquidDirKind};
