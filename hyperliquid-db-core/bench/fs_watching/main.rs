@@ -5,6 +5,7 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
+#[path = "runner.rs"]
 mod runner;
 
 #[cfg(target_os = "linux")]
