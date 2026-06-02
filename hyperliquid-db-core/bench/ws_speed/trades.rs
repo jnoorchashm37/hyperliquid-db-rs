@@ -10,7 +10,6 @@ use std::{
 };
 
 use hyperliquid_db_core::{
-    hl_fs::parsers::NodeFillsParser,
     processors::{HyperliquidDataProcessorHandle, TradeDeriver},
     types::{HyperliquidData, Trade},
     utils::{NS_PER_MS, unix_timestamp}
