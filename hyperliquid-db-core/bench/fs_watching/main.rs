@@ -5,9 +5,10 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
-mod fs_watching;
+#[path = "linux.rs"]
+mod runner;
 
 #[cfg(target_os = "linux")]
 fn main() {
-    fs_watching::run_fs_readers_bench();
+    runner::run_fs_readers_bench();
 }

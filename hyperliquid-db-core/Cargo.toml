@@ -25,10 +25,10 @@ tungstenite.workspace = true
 
 [[bench]]
 name = "fs_watching"
-path = "bench/fs_watching.rs"
+path = "bench/fs_watching/main.rs"
 harness = false
 
 [[bench]]
 name = "ws_speed"
-path = "bench/ws_speed.rs"
+path = "bench/ws_speed/main.rs"
 harness = false

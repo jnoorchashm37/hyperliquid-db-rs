@@ -17,9 +17,7 @@ use hyperliquid_db_core::{
 };
 use serde::Deserialize;
 
-use crate::ws_streams::utils::{
-    set_hl_websocket_read_timeout, spawn_hl_trades_websocket, spawn_hl_watcher
-};
+use crate::utils::{set_hl_websocket_read_timeout, spawn_hl_trades_websocket, spawn_hl_watcher};
 
 const TIMEOUT_SECS: u64 = 30;
 const PUBLIC_WS_READ_TIMEOUT_MS: u64 = 100;
