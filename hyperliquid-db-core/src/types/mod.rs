@@ -1,5 +1,9 @@
 mod trades;
 
+mod l4_orderbook;
+pub use l4_orderbook::{
+    L4Book, L4BookDiff, L4BookUpdates, L4Order, L4OrderBuilder, L4OrderDiff, L4OrderStatus, L4Side
+};
 use serde::{Deserialize, Serialize};
 pub use trades::{PendingTrade, Trade, TradeSide};
 mod l2_orderbook;
@@ -16,20 +20,23 @@ pub struct HyperliquidDataWithMeta<D> {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum HyperliquidData {
-    Trades(Vec<HyperliquidDataWithMeta<Trade>>)
+    Trades(Vec<HyperliquidDataWithMeta<Trade>>),
+    L4Book(Vec<HyperliquidDataWithMeta<L4Book>>)
 }
 
 impl HyperliquidData {
     pub fn kind(&self) -> HyperliquidDataKind {
         match self {
-            HyperliquidData::Trades(_) => HyperliquidDataKind::Trades
+            HyperliquidData::Trades(_) => HyperliquidDataKind::Trades,
+            HyperliquidData::L4Book(_) => HyperliquidDataKind::L4Book
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter)]
 pub enum HyperliquidDataKind {
-    Trades
+    Trades,
+    L4Book
 }
 
 impl HyperliquidDataKind {
@@ -39,7 +46,12 @@ impl HyperliquidDataKind {
 
     pub fn required_dirs(&self) -> Vec<HyperliquidDirKind> {
         match self {
-            HyperliquidDataKind::Trades => vec![HyperliquidDirKind::NodeFills]
+            HyperliquidDataKind::Trades => vec![HyperliquidDirKind::NodeFills],
+            HyperliquidDataKind::L4Book => vec![
+                HyperliquidDirKind::NodeFills,
+                HyperliquidDirKind::NodeOrderStatuses,
+                HyperliquidDirKind::NodeRawBookDiffs,
+            ]
         }
     }
 }

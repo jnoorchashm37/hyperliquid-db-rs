@@ -5,6 +5,12 @@ use eyre::Context;
 mod node_fills;
 pub use node_fills::NodeFillsParser;
 
+mod node_order_statuses;
+pub use node_order_statuses::NodeOrderStatusesParser;
+
+mod node_raw_book_diffs;
+pub use node_raw_book_diffs::NodeRawBookDiffsParser;
+
 use crate::{
     fs_handlers::types::FsOutData,
     hl_fs::{HyperliquidDirData, types::HyperliquidDirDataWithMeta}

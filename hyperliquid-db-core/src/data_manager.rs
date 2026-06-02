@@ -98,6 +98,7 @@ impl HyperliquidDataManager {
 
 fn kind_to_processor(kind: HyperliquidDataKind) -> Box<dyn HyperliquidDataProcessorHandle> {
     match kind {
-        HyperliquidDataKind::Trades => Box::new(TradeDeriver::new())
+        HyperliquidDataKind::Trades => Box::new(TradeDeriver::new()),
+        HyperliquidDataKind::L4Book => todo!()
     }
 }
