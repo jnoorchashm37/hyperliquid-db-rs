@@ -1,3 +1,5 @@
+#![cfg(target_os = "linux")]
+
 mod current_impl;
 mod existing_fs_reader;
 
