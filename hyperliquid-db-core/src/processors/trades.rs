@@ -66,7 +66,11 @@ impl HyperliquidDataProcessorHandle for TradeDeriver {
         data: &HyperliquidDirDataWithMeta
     ) -> eyre::Result<Option<HyperliquidData>> {
         let processing_data_at_ns = unix_timestamp().as_nanos();
-        let HyperliquidDirData::NodeFills(fills) = data.data.clone();
+
+        let fills = match &data.data {
+            HyperliquidDirData::NodeFills(items) => items.clone(),
+            _ => return Ok(None)
+        };
 
         let mut trades = Vec::new();
         for fill in fills.iter().flat_map(|fill| fill.events.clone()) {
