@@ -5,11 +5,11 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
-mod raw_fs_reader;
+mod fs_watching;
 #[cfg(target_os = "linux")]
-mod readers;
+mod raw_fs_reader;
 
 #[cfg(target_os = "linux")]
 fn main() {
-    readers::run_fs_readers_bench();
+    fs_watching::run_fs_readers_bench();
 }

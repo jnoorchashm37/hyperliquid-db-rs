@@ -5,11 +5,11 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
-mod ws_streams;
+mod ws_speed;
 
 #[cfg(target_os = "linux")]
 fn main() {
-    if let Err(err) = ws_streams::run_trades_ws_bench() {
+    if let Err(err) = ws_speed::run_trades_ws_bench() {
         eprintln!("{err:?}");
         std::process::exit(1);
     }
