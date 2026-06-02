@@ -116,3 +116,74 @@ mod _private {
         Remove
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{NodeRawBookDiffsRawBookDiff, NodeRawBookDiffsRows, NodeRawBookDiffsSide};
+
+    #[test]
+    fn deserializes_new_update_and_remove_sample_shapes() {
+        let row: NodeRawBookDiffsRows = serde_json::from_str(
+            r#"{
+                "local_time":"2026-06-02T10:00:00.865603615",
+                "block_time":"2026-06-02T09:59:59.457306449",
+                "block_number":1019927126,
+                "events":[
+                    {
+                        "user":"0x31ca8395cf837de08b24da3f660e77761dfb974b",
+                        "oid":452916385917,
+                        "coin":"JTO",
+                        "side":"A",
+                        "px":"0.65313",
+                        "raw_book_diff":{"new":{"sz":"1096.0"}}
+                    },
+                    {
+                        "user":"0x1c1c270b573d55b68b3d14722b5d5d401511bed0",
+                        "oid":452916245881,
+                        "coin":"BTC",
+                        "side":"A",
+                        "px":"69409.0",
+                        "raw_book_diff":{"update":{"origSz":"0.12246","newSz":"0.0"}}
+                    },
+                    {
+                        "user":"0x31ca8395cf837de08b24da3f660e77761dfb974b",
+                        "oid":452916042519,
+                        "coin":"STX",
+                        "side":"B",
+                        "px":"0.22495",
+                        "raw_book_diff":"remove"
+                    }
+                ]
+            }"#
+        )
+        .unwrap();
+
+        assert_eq!(row.local_time, "2026-06-02T10:00:00.865603615");
+        assert_eq!(row.block_time, "2026-06-02T09:59:59.457306449");
+        assert_eq!(row.block_number, 1019927126);
+        assert_eq!(row.events.len(), 3);
+
+        assert_eq!(row.events[0].side, NodeRawBookDiffsSide::A);
+        assert!((row.events[0].px - 0.65313).abs() < f64::EPSILON);
+        match row.events[0].raw_book_diff {
+            NodeRawBookDiffsRawBookDiff::New { sz } => {
+                assert!((sz - 1096.0).abs() < f64::EPSILON);
+            }
+            _ => panic!("expected new raw book diff")
+        }
+
+        assert_eq!(row.events[1].coin, "BTC");
+        assert!((row.events[1].px - 69409.0).abs() < f64::EPSILON);
+        match row.events[1].raw_book_diff {
+            NodeRawBookDiffsRawBookDiff::Update { orig_sz, new_sz } => {
+                assert!((orig_sz - 0.12246).abs() < f64::EPSILON);
+                assert!((new_sz - 0.0).abs() < f64::EPSILON);
+            }
+            _ => panic!("expected update raw book diff")
+        }
+
+        assert_eq!(row.events[2].side, NodeRawBookDiffsSide::B);
+        assert!((row.events[2].px - 0.22495).abs() < f64::EPSILON);
+        assert!(matches!(row.events[2].raw_book_diff, NodeRawBookDiffsRawBookDiff::Remove));
+    }
+}

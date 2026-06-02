@@ -166,3 +166,116 @@ mod _private {
         pub cloid:             Option<String>
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{NodeOrderStatusesRows, NodeOrderStatusesSide};
+
+    #[test]
+    fn deserializes_builder_and_child_order_sample_shapes() {
+        let row: NodeOrderStatusesRows = serde_json::from_str(
+            r#"{
+                "local_time":"2026-06-02T10:00:00.914047560",
+                "block_time":"2026-06-02T09:59:59.678571270",
+                "block_number":1019927129,
+                "events":[
+                    {
+                        "time":"2026-06-02T09:59:59.457306449",
+                        "user":"0x8f308355ce0604dd4fd872309d5761167655b07c",
+                        "hash":"0xab41fe01a96f0058acbb043ccada5601b00015e744621f2a4f0aa9546862da43",
+                        "builder":{"b":"0xb84c7fb41ee7d8781e2b0d59eed2accd2ae99533","f":15},
+                        "status":"open",
+                        "order":{
+                            "coin":"km:USOIL",
+                            "side":"B",
+                            "limitPx":"129.78",
+                            "sz":"106.796",
+                            "oid":452916386246,
+                            "timestamp":1780394399457,
+                            "triggerCondition":"N/A",
+                            "isTrigger":false,
+                            "triggerPx":"0.0",
+                            "children":[],
+                            "isPositionTpsl":false,
+                            "reduceOnly":false,
+                            "orderType":"Limit",
+                            "origSz":"106.796",
+                            "tif":"Gtc",
+                            "cloid":"0xaaa497eb2cabe32e233204e17d3350c1"
+                        }
+                    },
+                    {
+                        "time":"2026-06-02T09:59:59.678571270",
+                        "user":"0x55684b989f23978dc2ad4926736c463e225ea5cc",
+                        "hash":"0xba9ec888d37a4cf5bc18043ccada590201aa006e6e7d6bc75e6773db927e26e0",
+                        "builder":null,
+                        "status":"open",
+                        "order":{
+                            "coin":"xyz:XYZ100",
+                            "side":"B",
+                            "limitPx":"30505.0",
+                            "sz":"0.0093",
+                            "oid":452916388462,
+                            "timestamp":1780394399678,
+                            "triggerCondition":"N/A",
+                            "isTrigger":false,
+                            "triggerPx":"0.0",
+                            "children":[{
+                                "coin":"xyz:XYZ100",
+                                "side":"A",
+                                "limitPx":"26934.0",
+                                "sz":"0.0093",
+                                "oid":452916388462,
+                                "timestamp":1780394399678,
+                                "triggerCondition":"Price below 29927",
+                                "isTrigger":true,
+                                "triggerPx":"29927.0",
+                                "children":[],
+                                "isPositionTpsl":false,
+                                "reduceOnly":true,
+                                "orderType":"Stop Market",
+                                "origSz":"0.0093",
+                                "tif":null,
+                                "cloid":"0x5b931285742037753c624a2fcd1177b3"
+                            }],
+                            "isPositionTpsl":false,
+                            "reduceOnly":false,
+                            "orderType":"Limit",
+                            "origSz":"0.0093",
+                            "tif":"Alo",
+                            "cloid":"0x5b931285742037753c624a2fcd1177b3"
+                        }
+                    }
+                ]
+            }"#
+        )
+        .unwrap();
+
+        assert_eq!(row.local_time, "2026-06-02T10:00:00.914047560");
+        assert_eq!(row.block_time, "2026-06-02T09:59:59.678571270");
+        assert_eq!(row.block_number, 1019927129);
+        assert_eq!(row.events.len(), 2);
+
+        let builder_event = &row.events[0];
+        let builder = builder_event.builder.as_ref().unwrap();
+        assert_eq!(builder.b, "0xb84c7fb41ee7d8781e2b0d59eed2accd2ae99533");
+        assert_eq!(builder.f, 15);
+        assert_eq!(builder_event.order.side, NodeOrderStatusesSide::B);
+        assert!((builder_event.order.limit_px - 129.78).abs() < f64::EPSILON);
+        assert!((builder_event.order.sz - 106.796).abs() < f64::EPSILON);
+        assert_eq!(builder_event.order.tif.as_deref(), Some("Gtc"));
+        assert_eq!(
+            builder_event.order.cloid.as_deref(),
+            Some("0xaaa497eb2cabe32e233204e17d3350c1")
+        );
+
+        let parent = &row.events[1].order;
+        assert_eq!(parent.children.len(), 1);
+        assert_eq!(parent.children[0].side, NodeOrderStatusesSide::A);
+        assert!(parent.children[0].is_trigger);
+        assert!(parent.children[0].reduce_only);
+        assert!((parent.children[0].trigger_px - 29927.0).abs() < f64::EPSILON);
+        assert_eq!(parent.children[0].order_type, "Stop Market");
+        assert_eq!(parent.children[0].tif, None);
+    }
+}
