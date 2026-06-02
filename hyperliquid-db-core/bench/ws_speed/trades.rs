@@ -34,6 +34,7 @@ pub fn run_trades_ws_bench() -> eyre::Result<()> {
         .unwrap_or_else(|_| TIMEOUT_SECS.to_string())
         .parse()
         .unwrap();
+    println!("sleeping for {timeout} seconds");
     std::thread::sleep(Duration::from_secs(timeout));
     IS_RUNNING.store(false, Ordering::Release);
 
