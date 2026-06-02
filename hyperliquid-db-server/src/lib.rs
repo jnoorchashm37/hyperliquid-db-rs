@@ -2,6 +2,7 @@ pub mod builder;
 mod ws_manager;
 pub use ws_manager::WsHandler;
 mod data_client;
+pub mod play_bin;
 pub mod route;
 
 pub use data_client::HyperliquidDataClient;
