@@ -1,5 +1,5 @@
 use crate::hl_fs::{
-    parsers::HyperliquidDataParser, schemas::NodeRawBookDiffsRows, HyperliquidDirData
+    HyperliquidDirData, parsers::HyperliquidDataParser, schemas::NodeRawBookDiffsRows
 };
 
 #[derive(Default)]

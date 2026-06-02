@@ -43,7 +43,7 @@ impl<'de> Deserialize<'de> for NodeOrderStatusesRows {
 pub struct NodeOrderStatusesEvent {
     pub time:    String,
     pub user:    String,
-    pub hash:    String,
+    pub hash:    Option<String>,
     pub builder: Option<NodeOrderStatusesBuilder>,
     pub status:  String,
     pub order:   NodeOrderStatusesOrder
@@ -133,7 +133,7 @@ mod _private {
     pub struct NodeOrderStatusesEventRaw {
         pub time:    String,
         pub user:    String,
-        pub hash:    String,
+        pub hash:    Option<String>,
         pub builder: Option<NodeOrderStatusesBuilderRaw>,
         pub status:  String,
         pub order:   NodeOrderStatusesOrderRaw
@@ -277,5 +277,45 @@ mod tests {
         assert!((parent.children[0].trigger_px - 29927.0).abs() < f64::EPSILON);
         assert_eq!(parent.children[0].order_type, "Stop Market");
         assert_eq!(parent.children[0].tif, None);
+    }
+
+    #[test]
+    fn deserializes_null_event_hash() {
+        let row: NodeOrderStatusesRows = serde_json::from_str(
+            r#"{
+                "local_time":"2026-06-02T10:00:00.854461191",
+                "block_time":"2026-06-02T09:59:59.398971110",
+                "block_number":1019927125,
+                "events":[{
+                    "time":"2026-06-02T09:59:59.398971110",
+                    "user":"0x31ca8395cf837de08b24da3f660e77761dfb974b",
+                    "hash":null,
+                    "builder":null,
+                    "status":"canceled",
+                    "order":{
+                        "coin":"JTO",
+                        "side":"A",
+                        "limitPx":"0.65313",
+                        "sz":"1096.0",
+                        "oid":452916385917,
+                        "timestamp":1780394399398,
+                        "triggerCondition":"N/A",
+                        "isTrigger":false,
+                        "triggerPx":"0.0",
+                        "children":[],
+                        "isPositionTpsl":false,
+                        "reduceOnly":false,
+                        "orderType":"Limit",
+                        "origSz":"1096.0",
+                        "tif":"Alo",
+                        "cloid":null
+                    }
+                }]
+            }"#
+        )
+        .unwrap();
+
+        assert_eq!(row.events.len(), 1);
+        assert_eq!(row.events[0].hash, None);
     }
 }
