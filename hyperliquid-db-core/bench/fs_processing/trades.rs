@@ -10,7 +10,7 @@ use std::{
 };
 
 use hyperliquid_db_core::{
-    hl_fs::HyperliquidDirData,
+    hl_fs::{HyperliquidDirData, HyperliquidDirDataWithMeta},
     processors::{HyperliquidDataProcessorHandle, TradeDeriver},
     types::{HyperliquidData, Trade},
     utils::{NS_PER_MS, NS_PER_SEC, unix_timestamp}
@@ -118,14 +118,18 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
             };
 
             let channel_received_at_ns = unix_timestamp().as_nanos();
-            let rx_timestamp_ns = data.pipeline_meta.notification_received_at_ns;
-            let pipeline = data.pipeline_meta.pipeline;
+            let pipeline_meta = data.pipeline_meta.clone();
+            let rx_timestamp_ns = pipeline_meta.notification_received_at_ns;
+            let pipeline = pipeline_meta.pipeline;
             let HyperliquidDirData::NodeFills(rows) = data.data;
 
             for row in rows {
                 let row_local_time_ns = parse_node_timestamp_ns(&row.local_time)?;
                 let row_block_time_ns = parse_node_timestamp_ns(&row.block_time)?;
-                let row_data = HyperliquidDirData::NodeFills(vec![row]);
+                let row_data = HyperliquidDirDataWithMeta {
+                    data:          HyperliquidDirData::NodeFills(vec![row]),
+                    pipeline_meta: pipeline_meta.clone()
+                };
                 let trades = match deriver.handle_data(&row_data)? {
                     Some(HyperliquidData::Trades(trades)) => trades,
                     None => Vec::new()
