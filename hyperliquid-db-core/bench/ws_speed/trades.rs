@@ -31,7 +31,7 @@ pub fn run_trades_ws_bench() -> eyre::Result<()> {
     let implemented_stream_handle = run_implemented_stream();
 
     let timeout = std::env::var("TIMEOUT_SECS")
-        .unwrap_or(TIMEOUT_SECS)
+        .unwrap_or_else(|| TIMEOUT_SECS.to_string())
         .parse()
         .unwrap();
     std::thread::sleep(Duration::from_secs(timeout));
