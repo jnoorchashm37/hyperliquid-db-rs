@@ -30,7 +30,11 @@ pub fn run_trades_ws_bench() -> eyre::Result<()> {
     let public_ws_stream_handle = run_public_ws_stream();
     let implemented_stream_handle = run_implemented_stream();
 
-    std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
+    let timeout = std::env::var("TIMEOUT_SECS")
+        .unwrap_or(TIMEOUT_SECS)
+        .parse()
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(timeout));
     IS_RUNNING.store(false, Ordering::Release);
 
     let public_ws_stream = public_ws_stream_handle
