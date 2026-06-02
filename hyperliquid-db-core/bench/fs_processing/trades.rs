@@ -144,6 +144,7 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
                     derived_at_ns
                 };
 
+                let trades = trades.into_iter().map(|trade| trade.data).collect();
                 cache.new_trades(trades, rx_timestamp_ns, Some(fs_timing));
             }
 
