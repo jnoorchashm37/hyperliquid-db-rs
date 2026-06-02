@@ -1,17 +1,21 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
+    fs_handlers::types::FsOutData,
     hl_fs::{
-        HyperliquidDirData,
+        HyperliquidDirData, HyperliquidDirDataWithMeta,
         schemas::{NodeFillsFill, NodeFillsSide}
     },
     processors::HyperliquidDataProcessorHandle,
-    types::{HyperliquidData, PendingTrade, Trade}
+    types::{
+        HyperliquidData, HyperliquidDataWithMeta, ParsedDataPipelineMeta, PendingTrade, Trade
+    },
+    utils::unix_timestamp
 };
 
 #[derive(Default)]
 pub struct TradeDeriver {
-    pending_fills: HashMap<u64, PendingTrade>
+    pending_fills: HashMap<u64, (PendingTrade, ParsedDataPipelineMeta)>
 }
 
 impl TradeDeriver {
@@ -23,9 +27,15 @@ impl TradeDeriver {
         self.pending_fills.len()
     }
 
-    fn new_fill(&mut self, fill: NodeFillsFill) -> eyre::Result<Option<Trade>> {
+    fn new_fill(
+        &mut self,
+        fill: NodeFillsFill,
+        fs_data: Arc<FsOutData>,
+        processing_data_at_ns: u128
+    ) -> eyre::Result<Option<(Trade, ParsedDataPipelineMeta)>> {
         let tid = fill.tid;
-        let pending_trade = self.pending_fills.entry(tid).or_default();
+        let (pending_trade, pipeline_meta) = self.pending_fills.entry(tid).or_default();
+        pipeline_meta.modify_with_fs_data(&fs_data);
 
         match fill.side {
             NodeFillsSide::A => pending_trade.ask = Some(fill),
@@ -36,25 +46,34 @@ impl TradeDeriver {
             return Ok(None);
         }
 
-        let pending_trade = self
+        let (pending_trade, mut pipeline_meta) = self
             .pending_fills
             .remove(&tid)
             .expect("pending trade exists");
         let trade = pending_trade.into_trade()?;
         tracing::debug!(?trade, "found new trade");
 
-        Ok(Some(trade))
+        pipeline_meta.processing_data_at_ns = processing_data_at_ns;
+        pipeline_meta.processed_data_at_ns = unix_timestamp().as_nanos();
+
+        Ok(Some((trade, pipeline_meta)))
     }
 }
 
 impl HyperliquidDataProcessorHandle for TradeDeriver {
-    fn handle_data(&mut self, data: &HyperliquidDirData) -> eyre::Result<Option<HyperliquidData>> {
-        let HyperliquidDirData::NodeFills(fills) = data;
+    fn handle_data(
+        &mut self,
+        data: &HyperliquidDirDataWithMeta
+    ) -> eyre::Result<Option<HyperliquidData>> {
+        let processing_data_at_ns = unix_timestamp().as_nanos();
+        let HyperliquidDirData::NodeFills(fills) = data.data.clone();
 
         let mut trades = Vec::new();
         for fill in fills.iter().flat_map(|fill| fill.events.clone()) {
-            if let Some(trade) = self.new_fill(fill)? {
-                trades.push(trade);
+            if let Some((trade, pipeline_meta)) =
+                self.new_fill(fill, data.pipeline_meta.clone(), processing_data_at_ns)?
+            {
+                trades.push(HyperliquidDataWithMeta { data: trade, pipeline_meta });
             }
         }
 
@@ -65,10 +84,13 @@ impl HyperliquidDataProcessorHandle for TradeDeriver {
 #[cfg(test)]
 mod tests {
 
+    use std::sync::Arc;
+
     use super::TradeDeriver;
     use crate::{
+        fs_handlers::types::FsOutData,
         hl_fs::{
-            HyperliquidDirData,
+            HyperliquidDirData, HyperliquidDirDataWithMeta, HyperliquidDirKind,
             schemas::{NodeFillsFill, NodeFillsRow, NodeFillsSide}
         },
         processors::HyperliquidDataProcessorHandle,
@@ -92,12 +114,32 @@ mod tests {
         let mut deriver = TradeDeriver::new();
 
         deriver
-            .handle_data(&HyperliquidDirData::NodeFills(vec![row(vec![ask_fill(false)])]))
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeFills(vec![row(vec![ask_fill(false)])]),
+                pipeline_meta: Arc::new(FsOutData {
+                    name: HyperliquidDirKind::NodeFills,
+                    bytes: vec![],
+                    path: String::new(),
+                    chunk_len: 0,
+                    notification_received_at_ns: 0,
+                    pipeline: Default::default()
+                })
+            })
             .unwrap();
         assert_eq!(deriver.pending_fill_count(), 1);
 
         deriver
-            .handle_data(&HyperliquidDirData::NodeFills(vec![row(vec![bid_fill(true)])]))
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeFills(vec![row(vec![bid_fill(true)])]),
+                pipeline_meta: Arc::new(FsOutData {
+                    name: HyperliquidDirKind::NodeFills,
+                    bytes: vec![],
+                    path: String::new(),
+                    chunk_len: 0,
+                    notification_received_at_ns: 0,
+                    pipeline: Default::default()
+                })
+            })
             .unwrap();
         assert_eq!(deriver.pending_fill_count(), 0);
     }

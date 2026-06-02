@@ -29,6 +29,11 @@ path = "bench/fs_watching/main.rs"
 harness = false
 
 [[bench]]
-name = "ws_speed"
-path = "bench/ws_speed/main.rs"
+name = "fs_processing"
+path = "bench/fs_processing/main.rs"
+harness = false
+
+[[bench]]
+name = "pipeline_processing"
+path = "bench/pipeline_processing/main.rs"
 harness = false

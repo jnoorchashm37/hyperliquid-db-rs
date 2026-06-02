@@ -1,15 +1,22 @@
 mod trades;
+
 use serde::{Deserialize, Serialize};
 pub use trades::{PendingTrade, Trade, TradeSide};
 mod all_mids;
 pub use all_mids::AllMids;
 use strum::IntoEnumIterator;
 
-use crate::hl_fs::HyperliquidDirKind;
+use crate::{fs_handlers::types::FsOutData, hl_fs::HyperliquidDirKind};
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct HyperliquidDataWithMeta<D> {
+    pub data:          D,
+    pub pipeline_meta: ParsedDataPipelineMeta
+}
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum HyperliquidData {
-    Trades(Vec<Trade>)
+    Trades(Vec<HyperliquidDataWithMeta<Trade>>)
 }
 
 impl HyperliquidData {
@@ -34,5 +41,23 @@ impl HyperliquidDataKind {
         match self {
             HyperliquidDataKind::Trades => vec![HyperliquidDirKind::NodeFills]
         }
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct ParsedDataPipelineMeta {
+    /// latest `notification_received_at_ns` from the filesystem reciever
+    /// `FsOutData`
+    pub latest_notification_received_at_ns: u128,
+    pub processing_data_at_ns:              u128,
+    pub processed_data_at_ns:               u128
+}
+
+impl ParsedDataPipelineMeta {
+    pub fn modify_with_fs_data(&mut self, fs_data: &FsOutData) {
+        self.latest_notification_received_at_ns = std::cmp::max(
+            fs_data.notification_received_at_ns,
+            self.latest_notification_received_at_ns
+        );
     }
 }
