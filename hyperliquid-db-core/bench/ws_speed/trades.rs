@@ -19,7 +19,7 @@ use serde::Deserialize;
 
 use crate::utils::{set_hl_websocket_read_timeout, spawn_hl_trades_websocket, spawn_hl_watcher};
 
-const TIMEOUT_SECS: u64 = 30;
+const TIMEOUT_SECS: u64 = 60;
 const PUBLIC_WS_READ_TIMEOUT_MS: u64 = 100;
 const TRADES_COIN: &str = "BTC";
 static IS_RUNNING: AtomicBool = AtomicBool::new(true);
