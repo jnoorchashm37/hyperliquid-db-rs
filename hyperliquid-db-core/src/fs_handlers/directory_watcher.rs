@@ -11,7 +11,9 @@ use crate::{
     fs_handlers::types::{ActiveDirectory, FileTailState, FsOutData, FsPipelineTimestamps},
     hl_fs::{
         HyperliquidDirData, HyperliquidDirDataWithMeta, HyperliquidDirKind,
-        parsers::{HyperliquidDataParser, NodeFillsParser}
+        parsers::{
+            HyperliquidDataParser, NodeFillsParser, NodeOrderStatusesParser, NodeRawBookDiffsParser
+        }
     },
     utils::unix_timestamp
 };
@@ -41,7 +43,9 @@ impl DirectoryWatcher {
     pub fn run(mut self) {
         std::thread::spawn(move || {
             let result = match self.name {
-                HyperliquidDirKind::NodeFills => self.run_safe::<NodeFillsParser>()
+                HyperliquidDirKind::NodeFills => self.run_safe::<NodeFillsParser>(),
+                HyperliquidDirKind::NodeOrderStatuses => self.run_safe::<NodeOrderStatusesParser>(),
+                HyperliquidDirKind::NodeRawBookDiffs => self.run_safe::<NodeRawBookDiffsParser>()
             };
             if let Err(error) = result {
                 tracing::error!("error running filesystem watcher: {error:?}");
@@ -78,13 +82,13 @@ impl DirectoryWatcher {
                     continue;
                 }
 
-                let Some(path) = self
-                    .watch_dirs
-                    .get(&event.wd)
-                    .map(|dir_path| match event.name {
-                        Some(name) => dir_path.join(name),
-                        None => dir_path.clone()
-                    })
+                let Some(path) =
+                    self.watch_dirs
+                        .get(&event.wd)
+                        .map(|dir_path: &PathBuf| match event.name {
+                            Some(name) => dir_path.join(name),
+                            None => dir_path.clone()
+                        })
                 else {
                     continue;
                 };
