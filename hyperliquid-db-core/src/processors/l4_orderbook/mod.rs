@@ -1,8 +1,13 @@
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, VecDeque},
-    sync::Arc
+    env::home_dir,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex}
 };
+
+pub mod snapshots;
+pub mod types;
 
 use serde_json::Value;
 
@@ -12,7 +17,7 @@ use crate::{
         HyperliquidDirData, HyperliquidDirDataWithMeta,
         schemas::{NodeOrderStatusesRows, NodeRawBookDiffsRows}
     },
-    processors::HyperliquidDataProcessorHandle,
+    processors::{HyperliquidDataProcessorHandle, l4_orderbook::snapshots::StateSnapshotFetcher},
     types::{
         HyperliquidData, HyperliquidDataWithMeta, L4Book, L4BookDiff, L4BookUpdates, L4Order,
         L4OrderBuilder, L4OrderDiff, L4OrderStatus, L4Side, ParsedDataPipelineMeta
@@ -21,12 +26,14 @@ use crate::{
 };
 
 const PRICE_MULTIPLIER: f64 = 100_000_000.0;
+const FETCH_SNAPSHOT_SLEEP_TIME_SEC: u64 = 5;
 
 #[derive(Default)]
 pub struct L4BookDeriver {
     order_status_cache: BatchQueue<L4OrderStatus>,
     book_diff_cache:    BatchQueue<L4BookDiff>,
-    order_books:        HashMap<String, OrderBook>
+    order_books:        HashMap<String, OrderBook>,
+    state_snapshot:     StateSnapshotFetcher
 }
 
 impl L4BookDeriver {

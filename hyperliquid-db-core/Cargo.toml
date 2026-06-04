@@ -15,6 +15,7 @@ notify.workspace = true
 tracing.workspace = true
 strum.workspace = true
 itertools.workspace = true
+reqwest.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 inotify.workspace = true
