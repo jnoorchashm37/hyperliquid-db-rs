@@ -1,4 +1,7 @@
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
+
+use crate::{hl_fs::schemas::NODE_DATA_DATE_TIME_FORMAT, types::Side};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize)]
 pub struct NodeOrderStatusesRows {
@@ -6,6 +9,20 @@ pub struct NodeOrderStatusesRows {
     pub block_time:   String,
     pub block_number: u64,
     pub events:       Vec<NodeOrderStatusesEvent>
+}
+
+impl NodeOrderStatusesRows {
+    pub fn local_time_unix(&self) -> eyre::Result<u64> {
+        Ok(NaiveDateTime::parse_from_str(&self.local_time, NODE_DATA_DATE_TIME_FORMAT)?
+            .and_utc()
+            .timestamp() as u64)
+    }
+
+    pub fn block_time_unix(&self) -> eyre::Result<u64> {
+        Ok(NaiveDateTime::parse_from_str(&self.block_time, NODE_DATA_DATE_TIME_FORMAT)?
+            .and_utc()
+            .timestamp() as u64)
+    }
 }
 
 impl<'de> Deserialize<'de> for NodeOrderStatusesRows {
@@ -65,7 +82,7 @@ impl From<_private::NodeOrderStatusesBuilderRaw> for NodeOrderStatusesBuilder {
 #[serde(rename_all = "camelCase")]
 pub struct NodeOrderStatusesOrder {
     pub coin:              String,
-    pub side:              NodeOrderStatusesSide,
+    pub side:              Side,
     pub limit_px:          f64,
     pub sz:                f64,
     pub oid:               u64,
@@ -80,12 +97,6 @@ pub struct NodeOrderStatusesOrder {
     pub orig_sz:           f64,
     pub tif:               Option<String>,
     pub cloid:             Option<String>
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub enum NodeOrderStatusesSide {
-    A,
-    B
 }
 
 fn parse_order<E>(raw: _private::NodeOrderStatusesOrderRaw) -> Result<NodeOrderStatusesOrder, E>
@@ -119,7 +130,7 @@ where
 mod _private {
     use serde::{Deserialize, Serialize};
 
-    use super::NodeOrderStatusesSide;
+    use super::Side;
 
     #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
     pub struct NodeOrderStatusesRowsRaw {
@@ -149,7 +160,7 @@ mod _private {
     #[serde(rename_all = "camelCase")]
     pub struct NodeOrderStatusesOrderRaw {
         pub coin:              String,
-        pub side:              NodeOrderStatusesSide,
+        pub side:              Side,
         pub limit_px:          String,
         pub sz:                String,
         pub oid:               u64,
@@ -169,7 +180,8 @@ mod _private {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeOrderStatusesRows, NodeOrderStatusesSide};
+    use super::NodeOrderStatusesRows;
+    use crate::types::Side;
 
     #[test]
     fn deserializes_builder_and_child_order_sample_shapes() {
@@ -260,7 +272,7 @@ mod tests {
         let builder = builder_event.builder.as_ref().unwrap();
         assert_eq!(builder.b, "0xb84c7fb41ee7d8781e2b0d59eed2accd2ae99533");
         assert_eq!(builder.f, 15);
-        assert_eq!(builder_event.order.side, NodeOrderStatusesSide::B);
+        assert_eq!(builder_event.order.side, Side::Bid);
         assert!((builder_event.order.limit_px - 129.78).abs() < f64::EPSILON);
         assert!((builder_event.order.sz - 106.796).abs() < f64::EPSILON);
         assert_eq!(builder_event.order.tif.as_deref(), Some("Gtc"));
@@ -271,7 +283,7 @@ mod tests {
 
         let parent = &row.events[1].order;
         assert_eq!(parent.children.len(), 1);
-        assert_eq!(parent.children[0].side, NodeOrderStatusesSide::A);
+        assert_eq!(parent.children[0].side, Side::Ask);
         assert!(parent.children[0].is_trigger);
         assert!(parent.children[0].reduce_only);
         assert!((parent.children[0].trigger_px - 29927.0).abs() < f64::EPSILON);
@@ -317,5 +329,18 @@ mod tests {
 
         assert_eq!(row.events.len(), 1);
         assert_eq!(row.events[0].hash, None);
+    }
+
+    #[test]
+    fn parses_timestrings_to_unix_timestamps() {
+        let row = NodeOrderStatusesRows {
+            local_time:   "2026-06-05T00:00:00.003243951".to_string(),
+            block_time:   "2026-06-05T00:00:01.999999999".to_string(),
+            block_number: 0,
+            events:       Vec::new()
+        };
+
+        assert_eq!(row.local_time_unix().unwrap(), 1_780_617_600);
+        assert_eq!(row.block_time_unix().unwrap(), 1_780_617_601);
     }
 }

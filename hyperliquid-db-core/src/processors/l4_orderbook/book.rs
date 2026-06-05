@@ -1,8 +1,4 @@
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, HashMap, VecDeque},
-    sync::Arc
-};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::{
     processors::l4_orderbook::PRICE_MULTIPLIER,
@@ -27,10 +23,10 @@ impl OrderBook {
             self.oid_to_side_px.remove(&oid);
         }
 
-        if order.order_size()? > 0.0 {
+        if order.sz > 0.0 {
             let oid = order.oid;
             let side = order.side;
-            let px = (order.limit_px.parse::<f64>()? * PRICE_MULTIPLIER).round() as i64;
+            let px = (order.limit_px * PRICE_MULTIPLIER).round() as i64;
             self.oid_to_side_px.insert(oid, (side, px));
             match side {
                 Side::Ask => self.asks.entry(px).or_default().push_back(order),
@@ -67,7 +63,7 @@ impl OrderBook {
         true
     }
 
-    pub fn modify_sz(&mut self, oid: u64, sz: String) -> bool {
+    pub fn modify_sz(&mut self, oid: u64, sz: f64) -> bool {
         let Some((side, px)) = self.oid_to_side_px.get(&oid).copied() else {
             return false;
         };
@@ -90,7 +86,7 @@ impl OrderBook {
     }
 
     pub fn match_order(&mut self, taker_order: &mut L4Order) -> eyre::Result<Vec<u64>> {
-        let limit_px = (taker_order.limit_px.parse::<f64>()? * PRICE_MULTIPLIER).round() as i64;
+        let limit_px = (taker_order.limit_px * PRICE_MULTIPLIER).round() as i64;
         let filled_oids = match taker_order.side {
             Side::Ask => {
                 let keys = self
@@ -123,24 +119,22 @@ impl OrderBook {
         let mut filled_oids = Vec::new();
 
         for price in prices {
-            if taker_order.order_size()? <= 0.0 {
+            if taker_order.sz <= 0.0 {
                 break;
             }
 
             let mut empty_level = false;
             if let Some(level) = maker_orders.get_mut(&price) {
-                while taker_order.order_size()? > 0.0 {
+                while taker_order.sz > 0.0 {
                     let Some(maker_order) = level.front_mut() else {
                         break;
                     };
 
-                    let match_sz = taker_order.order_size()?.min(maker_order.order_size()?);
-                    taker_order.sz =
-                        format_decimal((taker_order.order_size()? - match_sz).max(0.0));
-                    maker_order.sz =
-                        format_decimal((taker_order.order_size()? - match_sz).max(0.0));
+                    let match_sz = taker_order.sz.min(maker_order.sz);
+                    taker_order.sz = (taker_order.sz - match_sz).max(0.0);
+                    maker_order.sz = (maker_order.sz - match_sz).max(0.0);
 
-                    if maker_order.order_size()? <= 0.0 {
+                    if maker_order.sz <= 0.0 {
                         filled_oids.push(maker_order.oid);
                         level.pop_front();
                     }
@@ -154,14 +148,5 @@ impl OrderBook {
         }
 
         Ok(filled_oids)
-    }
-}
-
-fn format_decimal(value: f64) -> String {
-    let value = value.to_string();
-    if value.contains('.') || value.contains('e') || value.contains('E') {
-        value
-    } else {
-        format!("{value}.0")
     }
 }

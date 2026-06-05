@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    processors::l4_orderbook::PRICE_MULTIPLIER,
+    processors::l4_orderbook::{PRICE_MULTIPLIER, book::OrderBook},
     types::{L4Order, Side}
 };
 
@@ -15,12 +15,24 @@ impl<O> Snapshots<O> {
         Self(value)
     }
 
-    pub const fn as_ref(&self) -> &HashMap<Coin, Snapshot<O>> {
-        &self.0
-    }
-
     pub fn value(self) -> HashMap<Coin, Snapshot<O>> {
         self.0
+    }
+}
+
+impl Snapshots<InnerL4Order> {
+    pub fn as_orderbooks(self) -> eyre::Result<HashMap<String, OrderBook>> {
+        let mut order_books = HashMap::new();
+
+        for (coin, snapshot) in self.value() {
+            let mut order_book = OrderBook::default();
+            for order in snapshot.into_levels().into_iter().flatten() {
+                order_book.add_order(order.into())?;
+            }
+            order_books.insert(coin.value(), order_book);
+        }
+
+        Ok(order_books)
     }
 }
 
@@ -37,7 +49,7 @@ impl<O> Snapshot<O> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InnerL4Order {
     pub user:              String,
     pub coin:              Coin,
@@ -48,7 +60,7 @@ pub struct InnerL4Order {
     pub timestamp:         u64,
     pub trigger_condition: String,
     pub is_trigger:        bool,
-    pub trigger_px:        String,
+    pub trigger_px:        f64,
     pub is_position_tpsl:  bool,
     pub reduce_only:       bool,
     pub order_type:        String,
@@ -90,16 +102,12 @@ impl InnerL4Order {
 
     pub fn convert_trigger(&mut self, ts: u64) {
         if self.is_trigger {
-            self.trigger_px = "0.0".to_string();
+            self.trigger_px = 0.0;
             self.trigger_condition = "Triggered".to_string();
             self.is_trigger = false;
             self.timestamp = ts;
             self.tif = Some("Gtc".to_string());
         }
-    }
-
-    fn coin(&self) -> Coin {
-        self.coin.clone()
     }
 }
 
@@ -125,8 +133,8 @@ impl TryFrom<(String, L4Order)> for InnerL4Order {
             ..
         } = value.1;
         let user = value.0;
-        let limit_px = Px::parse_from_str(&limit_px)?;
-        let sz = Sz::parse_from_str(&sz)?;
+        let limit_px = Px::new_f64(limit_px);
+        let sz = Sz::new_f64(sz);
         Ok(Self {
             user,
             coin: Coin::new(&coin),
@@ -166,14 +174,12 @@ impl From<InnerL4Order> for L4Order {
             tif,
             cloid
         } = value;
-        let limit_px = limit_px.to_str();
-        let sz = sz.to_str();
         Self {
             user: Some(user),
             coin: coin.value(),
             side,
-            limit_px,
-            sz,
+            limit_px: limit_px.to_f64(),
+            sz: sz.to_f64(),
             oid,
             timestamp,
             trigger_condition,
@@ -221,15 +227,13 @@ impl Px {
         Self(value)
     }
 
-    pub const fn value(self) -> u64 {
-        self.0
+    pub const fn new_f64(value: f64) -> Self {
+        let value = (value * PRICE_MULTIPLIER).round() as u64;
+        Self::new(value)
     }
 
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::cast_sign_loss)]
-    pub fn parse_from_str(value: &str) -> eyre::Result<Self> {
-        let value = (value.parse::<f64>()? * PRICE_MULTIPLIER).round() as u64;
-        Ok(Self::new(value))
+    pub const fn value(self) -> u64 {
+        self.0
     }
 
     #[must_use]
@@ -237,6 +241,10 @@ impl Px {
         let s = format!("{:.8}", (self.value() as f64) / PRICE_MULTIPLIER);
         let s = s.trim_end_matches('0');
         s.trim_end_matches('.').to_string()
+    }
+
+    pub const fn to_f64(self) -> f64 {
+        self.value() as f64 / PRICE_MULTIPLIER
     }
 
     #[allow(clippy::cast_possible_truncation)]
@@ -252,6 +260,11 @@ pub struct Sz(u64);
 impl Sz {
     pub const fn new(value: u64) -> Self {
         Self(value)
+    }
+
+    pub const fn new_f64(value: f64) -> Self {
+        let value = (value * PRICE_MULTIPLIER).round() as u64;
+        Self::new(value)
     }
 
     pub const fn is_positive(self) -> bool {
@@ -270,18 +283,15 @@ impl Sz {
         self.0 = self.0.saturating_sub(dec);
     }
 
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::cast_sign_loss)]
-    pub fn parse_from_str(value: &str) -> eyre::Result<Self> {
-        let value = (value.parse::<f64>()? * PRICE_MULTIPLIER).round() as u64;
-        Ok(Self::new(value))
-    }
-
     #[must_use]
     pub fn to_str(self) -> String {
         let s = format!("{:.8}", (self.value() as f64) / PRICE_MULTIPLIER);
         let s = s.trim_end_matches('0');
         s.trim_end_matches('.').to_string()
+    }
+
+    pub const fn to_f64(self) -> f64 {
+        self.value() as f64 / PRICE_MULTIPLIER
     }
 }
 

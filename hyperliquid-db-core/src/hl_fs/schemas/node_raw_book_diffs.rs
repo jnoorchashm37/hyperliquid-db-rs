@@ -1,4 +1,7 @@
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
+
+use crate::{hl_fs::schemas::NODE_DATA_DATE_TIME_FORMAT, types::Side};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize)]
 pub struct NodeRawBookDiffsRows {
@@ -6,6 +9,20 @@ pub struct NodeRawBookDiffsRows {
     pub block_time:   String,
     pub block_number: u64,
     pub events:       Vec<NodeRawBookDiffsEvent>
+}
+
+impl NodeRawBookDiffsRows {
+    pub fn local_time_unix(&self) -> eyre::Result<u64> {
+        Ok(NaiveDateTime::parse_from_str(&self.local_time, NODE_DATA_DATE_TIME_FORMAT)?
+            .and_utc()
+            .timestamp() as u64)
+    }
+
+    pub fn block_time_unix(&self) -> eyre::Result<u64> {
+        Ok(NaiveDateTime::parse_from_str(&self.block_time, NODE_DATA_DATE_TIME_FORMAT)?
+            .and_utc()
+            .timestamp() as u64)
+    }
 }
 
 impl<'de> Deserialize<'de> for NodeRawBookDiffsRows {
@@ -44,15 +61,9 @@ pub struct NodeRawBookDiffsEvent {
     pub user:          String,
     pub oid:           u64,
     pub coin:          String,
-    pub side:          NodeRawBookDiffsSide,
+    pub side:          Side,
     pub px:            f64,
     pub raw_book_diff: NodeRawBookDiffsRawBookDiff
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub enum NodeRawBookDiffsSide {
-    A,
-    B
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize)]
@@ -88,7 +99,7 @@ where
 mod _private {
     use serde::{Deserialize, Serialize};
 
-    use super::NodeRawBookDiffsSide;
+    use super::Side;
 
     #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
     pub struct NodeRawBookDiffsRowsRaw {
@@ -103,7 +114,7 @@ mod _private {
         pub user:          String,
         pub oid:           u64,
         pub coin:          String,
-        pub side:          NodeRawBookDiffsSide,
+        pub side:          Side,
         pub px:            String,
         pub raw_book_diff: NodeRawBookDiffsRawBookDiffRaw
     }
@@ -119,7 +130,7 @@ mod _private {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeRawBookDiffsRawBookDiff, NodeRawBookDiffsRows, NodeRawBookDiffsSide};
+    use super::{NodeRawBookDiffsRawBookDiff, NodeRawBookDiffsRows, Side};
 
     #[test]
     fn deserializes_new_update_and_remove_sample_shapes() {
@@ -163,7 +174,7 @@ mod tests {
         assert_eq!(row.block_number, 1019927126);
         assert_eq!(row.events.len(), 3);
 
-        assert_eq!(row.events[0].side, NodeRawBookDiffsSide::A);
+        assert_eq!(row.events[0].side, Side::Ask);
         assert!((row.events[0].px - 0.65313).abs() < f64::EPSILON);
         match row.events[0].raw_book_diff {
             NodeRawBookDiffsRawBookDiff::New { sz } => {
@@ -182,7 +193,7 @@ mod tests {
             _ => panic!("expected update raw book diff")
         }
 
-        assert_eq!(row.events[2].side, NodeRawBookDiffsSide::B);
+        assert_eq!(row.events[2].side, Side::Bid);
         assert!((row.events[2].px - 0.22495).abs() < f64::EPSILON);
         assert!(matches!(row.events[2].raw_book_diff, NodeRawBookDiffsRawBookDiff::Remove));
     }

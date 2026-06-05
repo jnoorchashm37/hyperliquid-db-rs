@@ -1,19 +1,15 @@
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{HashMap, VecDeque},
     sync::Arc
 };
 
 pub mod book;
 pub mod snapshots;
 pub mod types;
+pub mod utils;
 
-use serde_json::Value;
-
-use self::{
-    snapshots::{StateSnapshot, StateSnapshotFetcher},
-    types::Snapshots as StateSnapshots
-};
+use self::snapshots::{StateSnapshot, StateSnapshotFetcher};
 use crate::{
     fs_handlers::types::FsOutData,
     hl_fs::{
@@ -22,11 +18,14 @@ use crate::{
     },
     processors::{
         HyperliquidDataProcessorHandle,
-        l4_orderbook::{book::OrderBook, types::InnerL4Order}
+        l4_orderbook::{
+            book::OrderBook,
+            utils::{coin_to_book_updates, convert_trigger}
+        }
     },
     types::{
-        HyperliquidData, HyperliquidDataWithMeta, L4Book, L4BookDiff, L4BookUpdates, L4Order,
-        L4OrderBuilder, L4OrderDiff, L4OrderStatus, ParsedDataPipelineMeta, Side
+        HyperliquidData, HyperliquidDataWithMeta, L4Book, L4BookDiff, L4OrderDiff, L4OrderStatus,
+        ParsedDataPipelineMeta
     },
     utils::unix_timestamp
 };
@@ -71,7 +70,7 @@ impl L4BookDeriver {
             return Ok(false);
         };
 
-        self.order_books = order_books_from_snapshot(snapshots)?;
+        self.order_books = snapshots.as_orderbooks()?;
         self.snapshot_height = Some(height);
 
         if let Err(error) = self.apply_cached_batches() {
@@ -101,8 +100,18 @@ impl L4BookDeriver {
         fs_data: &Arc<FsOutData>
     ) -> eyre::Result<()> {
         for row in rows {
-            self.order_status_cache
-                .push(order_status_batch(row, fs_data)?)?;
+            let events = row
+                .events
+                .iter()
+                .cloned()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?;
+            self.order_status_cache.push(CachedBatch::new(
+                row.block_number,
+                row.block_time_unix()?,
+                events,
+                fs_data
+            ))?;
         }
 
         Ok(())
@@ -114,7 +123,16 @@ impl L4BookDeriver {
         fs_data: &Arc<FsOutData>
     ) -> eyre::Result<()> {
         for row in rows {
-            self.book_diff_cache.push(book_diff_batch(row, fs_data)?)?;
+            self.book_diff_cache.push(CachedBatch::new(
+                row.block_number,
+                row.block_time_unix()?,
+                row.events
+                    .iter()
+                    .cloned()
+                    .map(TryInto::try_into)
+                    .collect::<Result<Vec<_>, _>>()?,
+                fs_data
+            ))?;
         }
 
         Ok(())
@@ -155,8 +173,11 @@ impl L4BookDeriver {
                 continue;
             }
 
-            let mut pipeline_meta =
-                combine_pipeline_meta(order_statuses.pipeline_meta, book_diffs.pipeline_meta);
+            let mut pipeline_meta = order_statuses.pipeline_meta;
+            pipeline_meta.latest_notification_received_at_ns = pipeline_meta
+                .latest_notification_received_at_ns
+                .max(book_diffs.pipeline_meta.latest_notification_received_at_ns);
+
             pipeline_meta.processing_data_at_ns = processing_data_at_ns;
             pipeline_meta.processed_data_at_ns = unix_timestamp().as_nanos();
 
@@ -225,7 +246,7 @@ impl L4BookDeriver {
     ) -> eyre::Result<()> {
         let mut order_map = order_statuses
             .iter()
-            .filter(|order_status| is_inserted_into_book(order_status))
+            .filter(|order_status| order_status.is_inserted_into_book())
             .map(|order_status| (order_status.order.oid, order_status))
             .collect::<HashMap<_, _>>();
 
@@ -238,7 +259,7 @@ impl L4BookDeriver {
                     let mut order = order_status.order.clone();
                     order.user = Some(order_status.user.clone());
                     order.sz = sz.clone();
-                    convert_trigger(&mut order, &order_status.time)?;
+                    convert_trigger(&mut order, order_status.time_unix()?);
                     self.order_books
                         .entry(order.coin.clone())
                         .or_default()
@@ -303,6 +324,14 @@ struct CachedBatch<T> {
     pipeline_meta: ParsedDataPipelineMeta
 }
 
+impl<T> CachedBatch<T> {
+    fn new(block_number: u64, time: u64, events: Vec<T>, fs_data: &FsOutData) -> Self {
+        let mut pipeline_meta = ParsedDataPipelineMeta::default();
+        pipeline_meta.modify_with_fs_data(fs_data);
+        Self { block_number, time, events, pipeline_meta }
+    }
+}
+
 struct BatchQueue<T> {
     deque:      VecDeque<CachedBatch<T>>,
     last_block: Option<u64>
@@ -339,341 +368,6 @@ impl<T> BatchQueue<T> {
 
     fn len(&self) -> usize {
         self.deque.len()
-    }
-}
-
-fn order_books_from_snapshot(
-    snapshots: StateSnapshots<InnerL4Order>
-) -> eyre::Result<HashMap<String, OrderBook>> {
-    let mut order_books = HashMap::new();
-
-    for (coin, snapshot) in snapshots.value() {
-        let mut order_book = OrderBook::default();
-        for order in snapshot.into_levels().into_iter().flatten() {
-            order_book.add_order(order_from_snapshot_order(order))?;
-        }
-        order_books.insert(coin.value(), order_book);
-    }
-
-    Ok(order_books)
-}
-
-fn order_from_snapshot_order(order: InnerL4Order) -> L4Order {
-    L4Order {
-        user:              Some(order.user),
-        coin:              order.coin.value(),
-        side:              order.side,
-        limit_px:          order.limit_px.to_str(),
-        sz:                order.sz.to_str(),
-        oid:               order.oid,
-        timestamp:         order.timestamp,
-        trigger_condition: order.trigger_condition,
-        is_trigger:        order.is_trigger,
-        trigger_px:        order.trigger_px,
-        is_position_tpsl:  order.is_position_tpsl,
-        reduce_only:       order.reduce_only,
-        order_type:        order.order_type,
-        tif:               order.tif,
-        cloid:             order.cloid
-    }
-}
-
-fn order_status_batch(
-    row: &NodeOrderStatusesRows,
-    fs_data: &Arc<FsOutData>
-) -> eyre::Result<CachedBatch<L4OrderStatus>> {
-    let row = serde_json::to_value(row)?;
-    let block_number = u64_field(&row, "block_number")?;
-    let time = timestamp_millis(string_field(&row, "block_time")?)?;
-    let events = array_field(&row, "events")?
-        .iter()
-        .map(order_status_from_value)
-        .collect::<eyre::Result<Vec<_>>>()?;
-
-    Ok(CachedBatch { block_number, time, events, pipeline_meta: pipeline_meta(fs_data) })
-}
-
-fn book_diff_batch(
-    row: &NodeRawBookDiffsRows,
-    fs_data: &Arc<FsOutData>
-) -> eyre::Result<CachedBatch<L4BookDiff>> {
-    let row = serde_json::to_value(row)?;
-    let block_number = u64_field(&row, "block_number")?;
-    let time = timestamp_millis(string_field(&row, "block_time")?)?;
-    let events = array_field(&row, "events")?
-        .iter()
-        .map(book_diff_from_value)
-        .collect::<eyre::Result<Vec<_>>>()?;
-
-    Ok(CachedBatch { block_number, time, events, pipeline_meta: pipeline_meta(fs_data) })
-}
-
-fn order_status_from_value(value: &Value) -> eyre::Result<L4OrderStatus> {
-    Ok(L4OrderStatus {
-        time:    string_field(value, "time")?.to_string(),
-        user:    string_field(value, "user")?.to_string(),
-        hash:    optional_string_field(value, "hash")?,
-        builder: optional_object_field(value, "builder")?
-            .map(builder_from_value)
-            .transpose()?,
-        status:  string_field(value, "status")?.to_string(),
-        order:   order_from_value(json_field(value, "order")?)?
-    })
-}
-
-fn builder_from_value(value: &Value) -> eyre::Result<L4OrderBuilder> {
-    Ok(L4OrderBuilder { b: string_field(value, "b")?.to_string(), f: u64_field(value, "f")? })
-}
-
-fn book_diff_from_value(value: &Value) -> eyre::Result<L4BookDiff> {
-    Ok(L4BookDiff {
-        user:          string_field(value, "user")?.to_string(),
-        oid:           u64_field(value, "oid")?,
-        coin:          string_field(value, "coin")?.to_string(),
-        side:          optional_string_field(value, "side")?
-            .map(|side| side_from_str(&side))
-            .transpose()?,
-        px:            decimal_string(json_field(value, "px")?)?,
-        raw_book_diff: order_diff_from_value(json_field(value, "raw_book_diff")?)?
-    })
-}
-
-fn order_from_value(value: &Value) -> eyre::Result<L4Order> {
-    Ok(L4Order {
-        user:              optional_string_field(value, "user")?,
-        coin:              string_field(value, "coin")?.to_string(),
-        side:              side_from_str(string_field(value, "side")?)?,
-        limit_px:          decimal_string(json_field(value, "limitPx")?)?,
-        sz:                decimal_string(json_field(value, "sz")?)?,
-        oid:               u64_field(value, "oid")?,
-        timestamp:         u64_field(value, "timestamp")?,
-        trigger_condition: string_field(value, "triggerCondition")?.to_string(),
-        is_trigger:        bool_field(value, "isTrigger")?,
-        trigger_px:        decimal_string(json_field(value, "triggerPx")?)?,
-        is_position_tpsl:  bool_field(value, "isPositionTpsl")?,
-        reduce_only:       bool_field(value, "reduceOnly")?,
-        order_type:        string_field(value, "orderType")?.to_string(),
-        tif:               optional_string_field(value, "tif")?,
-        cloid:             optional_string_field(value, "cloid")?
-    })
-}
-
-fn order_diff_from_value(value: &Value) -> eyre::Result<L4OrderDiff> {
-    if value.as_str() == Some("remove") {
-        return Ok(L4OrderDiff::Remove);
-    }
-
-    let object = value
-        .as_object()
-        .ok_or_else(|| eyre::eyre!("expected raw book diff object"))?;
-    if let Some(new) = object.get("new") {
-        return Ok(L4OrderDiff::New { sz: decimal_string(json_field(new, "sz")?)? });
-    }
-    if let Some(update) = object.get("update") {
-        return Ok(L4OrderDiff::Update {
-            orig_sz: decimal_string(json_field(update, "origSz")?)?,
-            new_sz:  decimal_string(json_field(update, "newSz")?)?
-        });
-    }
-
-    Err(eyre::eyre!("unknown raw book diff variant: {value}"))
-}
-
-fn coin_to_book_updates(
-    order_statuses: Vec<L4OrderStatus>,
-    book_diffs: Vec<L4BookDiff>,
-    time: u64,
-    height: u64
-) -> Vec<L4BookUpdates> {
-    let mut updates = BTreeMap::<String, L4BookUpdates>::new();
-
-    for diff in book_diffs {
-        updates
-            .entry(diff.coin.clone())
-            .or_insert_with(|| L4BookUpdates::new(time, height))
-            .book_diffs
-            .push(diff);
-    }
-
-    for status in order_statuses {
-        updates
-            .entry(status.order.coin.clone())
-            .or_insert_with(|| L4BookUpdates::new(time, height))
-            .order_statuses
-            .push(status);
-    }
-
-    updates.into_values().collect()
-}
-
-fn is_inserted_into_book(order_status: &L4OrderStatus) -> bool {
-    (order_status.status == "open"
-        && !order_status.order.is_trigger
-        && order_status.order.tif.as_deref() != Some("Ioc"))
-        || (order_status.order.is_trigger && order_status.status == "triggered")
-}
-
-fn convert_trigger(order: &mut L4Order, status_time: &str) -> eyre::Result<()> {
-    if order.is_trigger {
-        order.trigger_px = "0.0".to_string();
-        order.trigger_condition = "Triggered".to_string();
-        order.is_trigger = false;
-        order.timestamp = timestamp_millis(status_time)?;
-        order.tif = Some("Gtc".to_string());
-    }
-
-    Ok(())
-}
-
-fn side_from_str(side: &str) -> eyre::Result<Side> {
-    match side {
-        "A" => Ok(Side::Ask),
-        "B" => Ok(Side::Bid),
-        _ => Err(eyre::eyre!("invalid L4 side: {side}"))
-    }
-}
-
-fn timestamp_millis(value: &str) -> eyre::Result<u64> {
-    let (date, time) = value
-        .split_once('T')
-        .ok_or_else(|| eyre::eyre!("invalid timestamp: {value}"))?;
-    let mut date_parts = date.split('-');
-    let year = parse_i64(date_parts.next(), "year", value)?;
-    let month = parse_i64(date_parts.next(), "month", value)?;
-    let day = parse_i64(date_parts.next(), "day", value)?;
-    if date_parts.next().is_some() {
-        return Err(eyre::eyre!("invalid timestamp date: {value}"));
-    }
-
-    let (time, fraction) = time.split_once('.').unwrap_or((time, ""));
-    let mut time_parts = time.split(':');
-    let hour = parse_i64(time_parts.next(), "hour", value)?;
-    let minute = parse_i64(time_parts.next(), "minute", value)?;
-    let second = parse_i64(time_parts.next(), "second", value)?;
-    if time_parts.next().is_some() {
-        return Err(eyre::eyre!("invalid timestamp time: {value}"));
-    }
-
-    let millis = days_from_civil(year, month, day)
-        .checked_mul(86_400_000)
-        .and_then(|millis| millis.checked_add(hour.checked_mul(3_600_000)?))
-        .and_then(|millis| millis.checked_add(minute.checked_mul(60_000)?))
-        .and_then(|millis| millis.checked_add(second.checked_mul(1_000)?))
-        .and_then(|millis| millis.checked_add(fraction_millis(fraction)?))
-        .ok_or_else(|| eyre::eyre!("timestamp overflow: {value}"))?;
-    if millis < 0 {
-        return Err(eyre::eyre!("negative timestamp is unsupported: {value}"));
-    }
-
-    Ok(millis as u64)
-}
-
-fn parse_i64(value: Option<&str>, field: &str, timestamp: &str) -> eyre::Result<i64> {
-    value
-        .ok_or_else(|| eyre::eyre!("missing {field} in timestamp: {timestamp}"))?
-        .parse()
-        .map_err(Into::into)
-}
-
-fn fraction_millis(fraction: &str) -> Option<i64> {
-    let mut millis = 0_i64;
-    for (idx, byte) in fraction.as_bytes().iter().take(3).enumerate() {
-        if !byte.is_ascii_digit() {
-            return None;
-        }
-        let digit = i64::from(byte - b'0');
-        millis += digit
-            * match idx {
-                0 => 100,
-                1 => 10,
-                _ => 1
-            };
-    }
-
-    Some(millis)
-}
-
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = year - i64::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let month_prime = month + if month > 2 { -3 } else { 9 };
-    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
-}
-
-fn pipeline_meta(fs_data: &Arc<FsOutData>) -> ParsedDataPipelineMeta {
-    let mut pipeline_meta = ParsedDataPipelineMeta::default();
-    pipeline_meta.modify_with_fs_data(fs_data);
-    pipeline_meta
-}
-
-fn combine_pipeline_meta(
-    mut left: ParsedDataPipelineMeta,
-    right: ParsedDataPipelineMeta
-) -> ParsedDataPipelineMeta {
-    left.latest_notification_received_at_ns = left
-        .latest_notification_received_at_ns
-        .max(right.latest_notification_received_at_ns);
-    left
-}
-
-fn json_field<'a>(value: &'a Value, field: &str) -> eyre::Result<&'a Value> {
-    value
-        .get(field)
-        .ok_or_else(|| eyre::eyre!("missing field `{field}` in {value}"))
-}
-
-fn array_field<'a>(value: &'a Value, field: &str) -> eyre::Result<&'a [Value]> {
-    json_field(value, field)?
-        .as_array()
-        .map(Vec::as_slice)
-        .ok_or_else(|| eyre::eyre!("field `{field}` is not an array in {value}"))
-}
-
-fn optional_object_field<'a>(value: &'a Value, field: &str) -> eyre::Result<Option<&'a Value>> {
-    match value.get(field) {
-        Some(Value::Null) | None => Ok(None),
-        Some(value) if value.is_object() => Ok(Some(value)),
-        Some(value) => Err(eyre::eyre!("field `{field}` is not an object or null in {value}"))
-    }
-}
-
-fn string_field<'a>(value: &'a Value, field: &str) -> eyre::Result<&'a str> {
-    json_field(value, field)?
-        .as_str()
-        .ok_or_else(|| eyre::eyre!("field `{field}` is not a string in {value}"))
-}
-
-fn optional_string_field(value: &Value, field: &str) -> eyre::Result<Option<String>> {
-    match value.get(field) {
-        Some(Value::Null) | None => Ok(None),
-        Some(Value::String(value)) => Ok(Some(value.clone())),
-        Some(value) => Err(eyre::eyre!("field `{field}` is not a string or null in {value}"))
-    }
-}
-
-fn bool_field(value: &Value, field: &str) -> eyre::Result<bool> {
-    json_field(value, field)?
-        .as_bool()
-        .ok_or_else(|| eyre::eyre!("field `{field}` is not a bool in {value}"))
-}
-
-fn u64_field(value: &Value, field: &str) -> eyre::Result<u64> {
-    json_field(value, field)?
-        .as_u64()
-        .ok_or_else(|| eyre::eyre!("field `{field}` is not an unsigned integer in {value}"))
-}
-
-fn decimal_string(value: &Value) -> eyre::Result<String> {
-    match value {
-        Value::String(value) => Ok(value.clone()),
-        Value::Number(value) => value
-            .as_f64()
-            .map(format_decimal)
-            .ok_or_else(|| eyre::eyre!("number is not representable as f64: {value}")),
-        _ => Err(eyre::eyre!("expected decimal string or number, got {value}"))
     }
 }
 

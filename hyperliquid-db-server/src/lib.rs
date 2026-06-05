@@ -4,6 +4,7 @@ pub use ws_manager::WsHandler;
 mod data_client;
 pub mod play_bin;
 pub mod route;
+pub mod types;
 
 pub use data_client::HyperliquidDataClient;
 use hyperliquid_db_core::types::HyperliquidDataKind;

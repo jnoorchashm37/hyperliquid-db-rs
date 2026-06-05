@@ -37,6 +37,7 @@ impl StateSnapshotFetcher {
         Self(Arc::new(Mutex::new(Some(snapshot))))
     }
 
+    #[allow(unused)]
     pub fn read<T>(&self, f: impl FnOnce(&Option<StateSnapshot>) -> T) -> eyre::Result<T> {
         let lock = self.0.try_lock().map_err(|e| eyre::eyre!("{e:?}"))?;
         let val = f(&lock);
@@ -51,6 +52,7 @@ impl StateSnapshotFetcher {
         Ok(val)
     }
 
+    #[allow(unused)]
     pub fn is_snapshot_set(&self) -> eyre::Result<bool> {
         self.read(|val| val.is_some())
     }
