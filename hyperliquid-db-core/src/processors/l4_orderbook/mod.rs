@@ -33,7 +33,8 @@ pub struct L4BookDeriver {
     order_status_cache: BatchQueue<L4OrderStatus>,
     book_diff_cache:    BatchQueue<L4BookDiff>,
     order_books:        HashMap<String, OrderBook>,
-    state_snapshot:     StateSnapshotFetcher
+    state_snapshot:     StateSnapshotFetcher,
+    snapshot_loaded:    bool
 }
 
 impl L4BookDeriver {
