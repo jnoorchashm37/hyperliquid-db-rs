@@ -24,6 +24,7 @@ const L2_BOOK_COIN: &str = "BTC";
 const L2_COMPARISON_DEPTH: usize = 20;
 const L2_MATCH_TIME_TOLERANCE_MS: u64 = 1_000;
 const DECIMAL_MULTIPLIER: f64 = 100_000_000.0;
+const PIPELINE_EMPTY_LOG_POLLS: u64 = 10;
 static IS_RUNNING: AtomicBool = AtomicBool::new(true);
 
 pub fn run_l2_book_ws_bench() -> eyre::Result<()> {
@@ -65,6 +66,7 @@ pub fn run_l2_book_ws_bench() -> eyre::Result<()> {
 
 fn run_public_ws_stream() -> JoinHandle<eyre::Result<L2BookCache>> {
     std::thread::spawn(move || {
+        println!("[l2 bench][public ws] connecting websocket");
         let subscription = serde_json::json!({
             "method": "subscribe",
             "subscription": {
@@ -77,6 +79,7 @@ fn run_public_ws_stream() -> JoinHandle<eyre::Result<L2BookCache>> {
             &mut public_ws_stream,
             Some(Duration::from_millis(PUBLIC_WS_READ_TIMEOUT_MS))
         )?;
+        println!("[l2 bench][public ws] subscribed to {L2_BOOK_COIN} l2Book");
 
         let mut cache = L2BookCache::new("public ws");
 
@@ -99,6 +102,17 @@ fn run_public_ws_stream() -> JoinHandle<eyre::Result<L2BookCache>> {
                 if message.channel == "l2Book" {
                     let l2_book = serde_json::from_value(message.data)?;
                     cache.new_public_l2_book(l2_book, rx_timestamp_ns);
+                    let count = cache.l2_books.len();
+                    if count == 1 || count % 10 == 0 {
+                        let latest_time = cache
+                            .l2_books
+                            .last()
+                            .map(|l2_book| l2_book.l2_book.data.time);
+                        println!(
+                            "[l2 bench][public ws] collected {count} {L2_BOOK_COIN} books \
+                             latest_time={latest_time:?}"
+                        );
+                    }
                 }
             }
 
@@ -107,25 +121,48 @@ fn run_public_ws_stream() -> JoinHandle<eyre::Result<L2BookCache>> {
             }
         }
 
+        println!(
+            "[l2 bench][public ws] stopped with {} {L2_BOOK_COIN} books",
+            cache.l2_books.len()
+        );
         Ok(cache)
     })
 }
 
 fn run_implemented_stream() -> JoinHandle<eyre::Result<L2BookCache>> {
     std::thread::spawn(move || {
+        println!("[l2 bench][pipeline] spawning HyperliquidDataManager watcher for L2Book");
         let mut implemented_stream = spawn_hl_watcher(HyperliquidDataKind::L2Book)?;
+        println!(
+            "[l2 bench][pipeline] watcher subscribed; waiting for derived {L2_BOOK_COIN} l2 books"
+        );
         let mut cache = L2BookCache::new("pipeline");
+        let mut empty_polls = 0;
+        let mut received_messages = 0;
+        let mut non_l2_messages = 0;
 
         loop {
             let data = match implemented_stream.try_recv() {
-                Ok(data) => data
-                    .as_ref()
-                    .as_ref()
-                    .map_err(|e| eyre::eyre!("{e:?}"))?
-                    .clone(),
+                Ok(data) => {
+                    empty_polls = 0;
+                    received_messages += 1;
+                    data.as_ref()
+                        .as_ref()
+                        .map_err(|e| eyre::eyre!("{e:?}"))?
+                        .clone()
+                }
                 Err(TryRecvError::Empty) => {
                     if !IS_RUNNING.load(Ordering::Relaxed) {
                         break;
+                    }
+                    empty_polls += 1;
+                    if empty_polls == 1 || empty_polls % PIPELINE_EMPTY_LOG_POLLS == 0 {
+                        println!(
+                            "[l2 bench][pipeline] no derived messages yet after {:.1}s; needs \
+                             live /root/hl/data order-status/raw-book-diff writes and snapshot \
+                             service on localhost:3001",
+                            empty_polls as f64 * PUBLIC_WS_READ_TIMEOUT_MS as f64 / 1_000.0
+                        );
                     }
                     std::thread::sleep(Duration::from_millis(PUBLIC_WS_READ_TIMEOUT_MS));
                     continue;
@@ -142,14 +179,45 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<L2BookCache>> {
 
             let stream_received_at_ns = unix_timestamp().as_nanos();
             let HyperliquidData::L2Book(l2_books) = data else {
+                non_l2_messages += 1;
+                println!(
+                    "[l2 bench][pipeline] received non-L2 pipeline message \
+                     non_l2_messages={non_l2_messages}"
+                );
                 continue;
             };
+            println!(
+                "[l2 bench][pipeline] received L2 batch with {} books \
+                 received_messages={received_messages}",
+                l2_books.len()
+            );
             cache.new_pipeline_l2_books(l2_books, stream_received_at_ns);
+            let count = cache.l2_books.len();
+            if count == 0 {
+                println!(
+                    "[l2 bench][pipeline] L2 batch did not contain {L2_BOOK_COIN}; cached count \
+                     remains 0"
+                );
+            } else if count == 1 || count % 10 == 0 {
+                let latest_time = cache
+                    .l2_books
+                    .last()
+                    .map(|l2_book| l2_book.l2_book.data.time);
+                println!(
+                    "[l2 bench][pipeline] cached {count} {L2_BOOK_COIN} books \
+                     latest_time={latest_time:?}"
+                );
+            }
 
             if !IS_RUNNING.load(Ordering::Relaxed) {
                 break
             }
         }
+        println!(
+            "[l2 bench][pipeline] stopped with {} {L2_BOOK_COIN} books from {received_messages} \
+             pipeline messages ({non_l2_messages} non-L2)",
+            cache.l2_books.len()
+        );
         Ok(cache)
     })
 }

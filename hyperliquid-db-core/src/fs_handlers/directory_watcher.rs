@@ -32,9 +32,15 @@ impl DirectoryWatcher {
         out_tx: mpsc::Sender<eyre::Result<HyperliquidDirDataWithMeta>>
     ) -> eyre::Result<()> {
         let directory = ActiveDirectory::new(name)?;
+        println!(
+            "[directory watcher] initializing {name:?} path={:?} existing_files={}",
+            directory.dir_path,
+            directory.file_states.len()
+        );
         let notifier = Inotify::init()?;
         let mut watcher = Self { name, directory, notifier, watch_dirs: HashMap::new(), out_tx };
         watcher.add_directory_watches_recursive(&watcher.directory.dir_path.clone())?;
+        println!("[directory watcher] watching {name:?} directories={}", watcher.watch_dirs.len());
         watcher.run();
 
         Ok(())
@@ -66,6 +72,7 @@ impl DirectoryWatcher {
         let mut parser = P::default();
 
         let mut event_buf = [0_u8; 16 * 1024];
+        println!("[directory watcher] {name:?} waiting for filesystem events", name = self.name);
 
         loop {
             let events = self.notifier.read_events_blocking(&mut event_buf)?;
@@ -207,6 +214,15 @@ impl DirectoryWatcher {
             })?;
             let drain_new_bytes_finished_at_ns = unix_timestamp().as_nanos();
             let drain_file_finished_at_ns = unix_timestamp().as_nanos();
+
+            if !chunks.is_empty() {
+                let total_bytes: usize = chunks.iter().map(|chunk| chunk.chunk_len).sum();
+                println!(
+                    "[directory watcher] {name:?} drained {} chunks / {total_bytes} bytes from \
+                     {path}",
+                    chunks.len()
+                );
+            }
 
             for chunk in chunks {
                 let channel_send_started_at_ns = unix_timestamp().as_nanos();

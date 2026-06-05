@@ -37,15 +37,16 @@ const FETCH_SNAPSHOT_SLEEP_TIME_SEC: u64 = 5;
 
 #[derive(Default)]
 pub struct OrderBookDeriver {
-    order_status_cache: BatchQueue<L4OrderStatus>,
-    book_diff_cache:    BatchQueue<L4BookDiff>,
-    order_books:        BTreeMap<String, OrderBook>,
-    state_snapshot:     StateSnapshotFetcher,
-    snapshot_height:    Option<u64>,
-    book_time:          u64,
-    snapshots_pending:  bool,
-    ignore_spot:        bool,
-    outputs:            OrderBookOutputs
+    order_status_cache:          BatchQueue<L4OrderStatus>,
+    book_diff_cache:             BatchQueue<L4BookDiff>,
+    order_books:                 BTreeMap<String, OrderBook>,
+    state_snapshot:              StateSnapshotFetcher,
+    snapshot_height:             Option<u64>,
+    book_time:                   u64,
+    snapshots_pending:           bool,
+    ignore_spot:                 bool,
+    logged_waiting_for_snapshot: bool,
+    outputs:                     OrderBookOutputs
 }
 
 impl OrderBookDeriver {
@@ -107,14 +108,34 @@ impl OrderBookDeriver {
 
         let Some(StateSnapshot { height, snapshots }) = self.state_snapshot.write(Option::take)?
         else {
+            if !self.logged_waiting_for_snapshot {
+                println!(
+                    "[orderbook deriver] waiting for state snapshot before emitting books; \
+                     pending_order_status_batches={} pending_book_diff_batches={}",
+                    self.order_status_cache.len(),
+                    self.book_diff_cache.len()
+                );
+                self.logged_waiting_for_snapshot = true;
+            }
             return Ok(false);
         };
+        self.logged_waiting_for_snapshot = false;
+        println!(
+            "[orderbook deriver] initializing from snapshot height={height}; \
+             pending_order_status_batches={} pending_book_diff_batches={}",
+            self.order_status_cache.len(),
+            self.book_diff_cache.len()
+        );
 
         self.order_books = snapshots.into_orderbooks(self.ignore_spot)?;
         self.snapshot_height = Some(height);
         self.book_time = 0;
 
         if let Err(error) = self.apply_cached_batches() {
+            println!(
+                "[orderbook deriver] failed to apply cached batches after snapshot \
+                 height={height}; waiting for next snapshot: {error:?}"
+            );
             tracing::info!(
                 ?error,
                 "Failed to apply updates to this book (likely missing older updates). Waiting for \
@@ -131,6 +152,14 @@ impl OrderBookDeriver {
             order_count = self.order_count(),
             "l4 order book ready"
         );
+        println!(
+            "[orderbook deriver] ready snapshot_height={} order_count={} outputs_l2={} \
+             outputs_l4={}",
+            self.snapshot_height.unwrap_or(height),
+            self.order_count(),
+            self.outputs.l2,
+            self.outputs.l4
+        );
         Ok(true)
     }
 
@@ -139,6 +168,7 @@ impl OrderBookDeriver {
         self.snapshot_height = None;
         self.book_time = 0;
         self.snapshots_pending = false;
+        self.logged_waiting_for_snapshot = false;
         self.state_snapshot.fetch_new();
     }
 
@@ -241,6 +271,9 @@ impl OrderBookDeriver {
             pipeline_meta.processing_data_at_ns = processing_data_at_ns;
             pipeline_meta.processed_data_at_ns = unix_timestamp().as_nanos();
 
+            let l2_before = out.l2.len();
+            let l4_before = out.l4.len();
+
             if self.outputs.l2 {
                 out.l2.extend(self.l2_updates_for_book_diffs(
                     &book_diffs.events,
@@ -261,6 +294,22 @@ impl OrderBookDeriver {
                         pipeline_meta: pipeline_meta.clone()
                     });
                 }
+            }
+
+            let l2_added = out.l2.len() - l2_before;
+            let l4_added = out.l4.len() - l4_before;
+            if l2_added > 0 || l4_added > 0 {
+                println!(
+                    "[orderbook deriver] applied block={} time={} l2_books_added={} \
+                     l4_updates_added={} pending_order_status_batches={} \
+                     pending_book_diff_batches={}",
+                    book_diffs.block_number,
+                    book_diffs.time,
+                    l2_added,
+                    l4_added,
+                    self.order_status_cache.len(),
+                    self.book_diff_cache.len()
+                );
             }
         }
 
@@ -450,9 +499,23 @@ impl HyperliquidDataProcessorHandle for OrderBookDeriver {
         match &data.data {
             HyperliquidDirData::NodeOrderStatuses(rows) => {
                 self.receive_order_statuses(rows, &data.pipeline_meta)?;
+                println!(
+                    "[orderbook deriver] received {} order-status rows; \
+                     pending_order_status_batches={} pending_book_diff_batches={}",
+                    rows.len(),
+                    self.order_status_cache.len(),
+                    self.book_diff_cache.len()
+                );
             }
             HyperliquidDirData::NodeRawBookDiffs(rows) => {
                 self.receive_book_diffs(rows, &data.pipeline_meta)?;
+                println!(
+                    "[orderbook deriver] received {} raw-book-diff rows; \
+                     pending_order_status_batches={} pending_book_diff_batches={}",
+                    rows.len(),
+                    self.order_status_cache.len(),
+                    self.book_diff_cache.len()
+                );
             }
             _ => return Ok(Vec::new())
         }
@@ -916,15 +979,16 @@ mod tests {
 
     fn deriver_without_snapshot() -> OrderBookDeriver {
         OrderBookDeriver {
-            order_status_cache: Default::default(),
-            book_diff_cache:    Default::default(),
-            order_books:        Default::default(),
-            state_snapshot:     StateSnapshotFetcher::empty(),
-            snapshot_height:    None,
-            book_time:          0,
-            snapshots_pending:  false,
-            ignore_spot:        false,
-            outputs:            Default::default()
+            order_status_cache:          Default::default(),
+            book_diff_cache:             Default::default(),
+            order_books:                 Default::default(),
+            state_snapshot:              StateSnapshotFetcher::empty(),
+            snapshot_height:             None,
+            book_time:                   0,
+            snapshots_pending:           false,
+            ignore_spot:                 false,
+            logged_waiting_for_snapshot: false,
+            outputs:                     Default::default()
         }
     }
 
@@ -937,32 +1001,34 @@ mod tests {
         snapshots: Snapshots<InnerL4Order>
     ) -> OrderBookDeriver {
         OrderBookDeriver {
-            order_status_cache: Default::default(),
-            book_diff_cache:    Default::default(),
-            order_books:        Default::default(),
-            state_snapshot:     StateSnapshotFetcher::with_snapshot(StateSnapshot {
+            order_status_cache:          Default::default(),
+            book_diff_cache:             Default::default(),
+            order_books:                 Default::default(),
+            state_snapshot:              StateSnapshotFetcher::with_snapshot(StateSnapshot {
                 height,
                 snapshots
             }),
-            snapshot_height:    None,
-            book_time:          0,
-            snapshots_pending:  false,
-            ignore_spot:        false,
-            outputs:            Default::default()
+            snapshot_height:             None,
+            book_time:                   0,
+            snapshots_pending:           false,
+            ignore_spot:                 false,
+            logged_waiting_for_snapshot: false,
+            outputs:                     Default::default()
         }
     }
 
     fn ready_deriver(height: u64) -> OrderBookDeriver {
         OrderBookDeriver {
-            order_status_cache: Default::default(),
-            book_diff_cache:    Default::default(),
-            order_books:        Default::default(),
-            state_snapshot:     StateSnapshotFetcher::empty(),
-            snapshot_height:    Some(height),
-            book_time:          0,
-            snapshots_pending:  false,
-            ignore_spot:        false,
-            outputs:            Default::default()
+            order_status_cache:          Default::default(),
+            book_diff_cache:             Default::default(),
+            order_books:                 Default::default(),
+            state_snapshot:              StateSnapshotFetcher::empty(),
+            snapshot_height:             Some(height),
+            book_time:                   0,
+            snapshots_pending:           false,
+            ignore_spot:                 false,
+            logged_waiting_for_snapshot: false,
+            outputs:                     Default::default()
         }
     }
 

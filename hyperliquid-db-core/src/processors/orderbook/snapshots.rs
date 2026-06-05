@@ -69,18 +69,41 @@ impl StateSnapshotFetcher {
 
         let this = self.clone();
         std::thread::spawn(move || {
+            println!(
+                "[orderbook snapshot] waiting {FETCH_SNAPSHOT_SLEEP_TIME_SEC}s before requesting \
+                 fresh l4 snapshot"
+            );
             std::thread::sleep(std::time::Duration::from_secs(FETCH_SNAPSHOT_SLEEP_TIME_SEC));
-            let snapshot_out_path = Self::process_rmp_file().unwrap();
-            let (height, snapshots) = Self::load_snapshots_from_file::<
-                InnerL4Order,
-                (String, L4Order)
-            >(&snapshot_out_path)
-            .unwrap();
+            let snapshot_out_path = match Self::process_rmp_file() {
+                Ok(snapshot_out_path) => snapshot_out_path,
+                Err(error) => {
+                    println!("[orderbook snapshot] failed to request snapshot: {error:?}");
+                    return;
+                }
+            };
+            println!("[orderbook snapshot] loading snapshot file {snapshot_out_path:?}");
+            let (height, snapshots) =
+                match Self::load_snapshots_from_file::<InnerL4Order, (String, L4Order)>(
+                    &snapshot_out_path
+                ) {
+                    Ok((height, snapshots)) => (height, snapshots),
+                    Err(error) => {
+                        println!(
+                            "[orderbook snapshot] failed to load snapshot file \
+                             {snapshot_out_path:?}: {error:?}"
+                        );
+                        return;
+                    }
+                };
+            println!("[orderbook snapshot] loaded snapshot height={height}");
             // sleep to let some updates build up.
             std::thread::sleep(std::time::Duration::from_secs(1));
 
-            this.write(|val| *val = Some(StateSnapshot { height, snapshots }))
-                .unwrap();
+            if let Err(error) = this.write(|val| *val = Some(StateSnapshot { height, snapshots })) {
+                println!("[orderbook snapshot] failed to publish snapshot: {error:?}");
+                return;
+            }
+            println!("[orderbook snapshot] snapshot published height={height}");
         });
     }
 
@@ -94,6 +117,10 @@ impl StateSnapshotFetcher {
         }
 
         let output_path = dir_path.join(format!("{}.json", unix_timestamp().as_secs()));
+        println!(
+            "[orderbook snapshot] requesting l4Snapshots from http://localhost:3001/info \
+             out_path={output_path:?}"
+        );
 
         let payload = serde_json::json!({
             "type": "fileSnapshot",
@@ -113,6 +140,7 @@ impl StateSnapshotFetcher {
             .json(&payload)
             .send()?
             .error_for_status()?;
+        println!("[orderbook snapshot] snapshot request accepted");
 
         Ok(output_path)
     }
