@@ -22,6 +22,7 @@ const TIMEOUT_SECS: u64 = 60;
 const PUBLIC_WS_READ_TIMEOUT_MS: u64 = 100;
 const L2_BOOK_COIN: &str = "BTC";
 const L2_COMPARISON_DEPTH: usize = 20;
+const L2_MATCH_TIME_TOLERANCE_MS: u64 = 1_000;
 const DECIMAL_MULTIPLIER: f64 = 100_000_000.0;
 static IS_RUNNING: AtomicBool = AtomicBool::new(true);
 
@@ -347,22 +348,13 @@ impl PipelineStats {
 
 impl L2BookTimeComparionMetrics {
     fn compare_l2_book_caches(cache0: L2BookCache, cache1: L2BookCache) -> Self {
-        let mut cache0_l2_books_by_key = cache0
-            .l2_books
-            .iter()
-            .filter_map(|l2_book| {
-                Some((l2_book_comparison_key(&l2_book.l2_book.data)?, l2_book.clone()))
-            })
-            .collect::<HashMap<_, _>>();
+        let mut cache0_l2_books_by_key = l2_books_by_comparison_key(&cache0.l2_books);
 
         let mut similiar_l2_books = Vec::new();
 
         cache1.l2_books.iter().for_each(|l2_book| {
-            let Some(key) = l2_book_comparison_key(&l2_book.l2_book.data) else {
-                return;
-            };
-
-            if let Some(cach0_l2_book) = cache0_l2_books_by_key.remove(&key) {
+            if let Some(cach0_l2_book) = remove_l2_book_match(&mut cache0_l2_books_by_key, l2_book)
+            {
                 similiar_l2_books.push((cach0_l2_book.clone(), l2_book.clone()));
             }
         });
@@ -372,9 +364,11 @@ impl L2BookTimeComparionMetrics {
         let similiar_l2_books_len = similiar_l2_books.len();
         assert!(
             similiar_l2_books_len > 0,
-            "no comparable live l2 books found - {} count: {}, live comparable count: {}, time \
-             range: {:?}, live time range: {:?}, sample: {:?};\n\n {} count: {}, live comparable \
-             count: {}, time range: {:?}, live time range: {:?}, sample: {:?}",
+            "no comparable live l2 books found with {} ms time tolerance - {} count: {}, live \
+             comparable count: {}, time range: {:?}, live time range: {:?}, sample: {:?};\n\n {} \
+             count: {}, live comparable count: {}, time range: {:?}, live time range: {:?}, \
+             sample: {:?}",
+            L2_MATCH_TIME_TOLERANCE_MS,
             cache0.name,
             cache0.l2_books.len(),
             cache0_live_l2_books_len,
@@ -681,7 +675,6 @@ fn percentile_f64(samples: &[f64], percentile: f64) -> f64 {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct L2BookComparisonKey {
     coin:   String,
-    time:   u64,
     levels: [Vec<L2BookComparisonLevel>; 2]
 }
 
@@ -699,12 +692,58 @@ fn l2_book_comparison_key(l2_book: &L2Book) -> Option<L2BookComparisonKey> {
 
     Some(L2BookComparisonKey {
         coin:   l2_book.coin.clone(),
-        time:   l2_book.time,
         levels: [
             l2_book_comparison_levels(l2_book.bids())?,
             l2_book_comparison_levels(l2_book.asks())?
         ]
     })
+}
+
+fn l2_books_by_comparison_key(
+    l2_books: &[TimestampedL2Book]
+) -> HashMap<L2BookComparisonKey, Vec<TimestampedL2Book>> {
+    let mut by_key = HashMap::new();
+
+    for l2_book in l2_books {
+        let Some(key) = l2_book_comparison_key(&l2_book.l2_book.data) else {
+            continue;
+        };
+        by_key
+            .entry(key)
+            .or_insert_with(Vec::new)
+            .push(l2_book.clone());
+    }
+
+    by_key
+}
+
+fn remove_l2_book_match(
+    candidates_by_key: &mut HashMap<L2BookComparisonKey, Vec<TimestampedL2Book>>,
+    target: &TimestampedL2Book
+) -> Option<TimestampedL2Book> {
+    let key = l2_book_comparison_key(&target.l2_book.data)?;
+    let target_time = target.l2_book.data.time;
+
+    let (matched, remove_key) = {
+        let candidates = candidates_by_key.get_mut(&key)?;
+        let (idx, _) = candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, candidate)| {
+                let time_diff = candidate.l2_book.data.time.abs_diff(target_time);
+                (time_diff <= L2_MATCH_TIME_TOLERANCE_MS).then_some((idx, time_diff))
+            })
+            .min_by_key(|(idx, time_diff)| (*time_diff, *idx))?;
+
+        let matched = candidates.remove(idx);
+        (matched, candidates.is_empty())
+    };
+
+    if remove_key {
+        candidates_by_key.remove(&key);
+    }
+
+    Some(matched)
 }
 
 fn l2_book_comparison_levels(levels: &[L2BookLevel]) -> Option<Vec<L2BookComparisonLevel>> {
