@@ -1,6 +1,6 @@
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
-use serde_with::{DisplayFromStr, serde_as};
+use serde_with::{DisplayFromStr, PickFirst, Same, serde_as};
 
 use crate::{
     hl_fs::schemas::{
@@ -119,15 +119,15 @@ pub struct L4Order {
     pub user:              Option<String>,
     pub coin:              String,
     pub side:              Side,
-    #[serde_as(as = "DisplayFromStr")]
+    #[serde_as(as = "PickFirst<(Same, DisplayFromStr)>")]
     pub limit_px:          f64,
-    #[serde_as(as = "DisplayFromStr")]
+    #[serde_as(as = "PickFirst<(Same, DisplayFromStr)>")]
     pub sz:                f64,
     pub oid:               u64,
     pub timestamp:         u64,
     pub trigger_condition: String,
     pub is_trigger:        bool,
-    #[serde_as(as = "DisplayFromStr")]
+    #[serde_as(as = "PickFirst<(Same, DisplayFromStr)>")]
     pub trigger_px:        f64,
     pub is_position_tpsl:  bool,
     pub reduce_only:       bool,

@@ -14,6 +14,7 @@ use hyperliquid_db_core::{
     utils::{NS_PER_MS, unix_timestamp}
 };
 use serde::Deserialize;
+use tokio::sync::broadcast::error::TryRecvError;
 
 use crate::utils::{set_hl_websocket_read_timeout, spawn_hl_trades_websocket, spawn_hl_watcher};
 
@@ -23,6 +24,7 @@ const L2_BOOK_COIN: &str = "BTC";
 static IS_RUNNING: AtomicBool = AtomicBool::new(true);
 
 pub fn run_l2_book_ws_bench() -> eyre::Result<()> {
+    IS_RUNNING.store(true, Ordering::Release);
     println!("subscribing to public l2 book websocket for {L2_BOOK_COIN}");
 
     let public_ws_stream_handle = run_public_ws_stream();
@@ -32,9 +34,10 @@ pub fn run_l2_book_ws_bench() -> eyre::Result<()> {
         .unwrap_or_else(|_| TIMEOUT_SECS.to_string())
         .parse()
         .unwrap();
-    println!("sleeping for {timeout} seconds");
+    println!("collecting samples for {timeout} seconds (override with TIMEOUT_SECS)");
     std::thread::sleep(Duration::from_secs(timeout));
     IS_RUNNING.store(false, Ordering::Release);
+    println!("collection window elapsed; stopping streams");
 
     let public_ws_stream = public_ws_stream_handle
         .join()
@@ -105,14 +108,26 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<L2BookCache>> {
         let mut cache = L2BookCache::new("pipeline");
 
         loop {
-            let data = match implemented_stream.blocking_recv() {
+            let data = match implemented_stream.try_recv() {
                 Ok(data) => data
                     .as_ref()
                     .as_ref()
                     .map_err(|e| eyre::eyre!("{e:?}"))?
                     .clone(),
-                Err(err) => {
-                    return Err(eyre::eyre!("implemented stream channel disconnected - {err:?}"));
+                Err(TryRecvError::Empty) => {
+                    if !IS_RUNNING.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(PUBLIC_WS_READ_TIMEOUT_MS));
+                    continue;
+                }
+                Err(TryRecvError::Closed) => {
+                    return Err(eyre::eyre!("implemented stream channel disconnected"));
+                }
+                Err(TryRecvError::Lagged(skipped)) => {
+                    return Err(eyre::eyre!(
+                        "implemented stream lagged and skipped {skipped} messages"
+                    ));
                 }
             };
 
