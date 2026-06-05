@@ -17,7 +17,7 @@ pub fn spawn_hl_websocket() -> eyre::Result<HlWebSocket> {
 }
 
 pub fn spawn_hl_trades_websocket(
-    coin: &str,
+    _coin: &str,
     subscription: serde_json::Value
 ) -> eyre::Result<HlWebSocket> {
     let mut socket = spawn_hl_websocket()?;

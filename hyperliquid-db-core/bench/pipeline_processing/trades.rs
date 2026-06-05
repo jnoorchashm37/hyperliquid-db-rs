@@ -57,10 +57,10 @@ fn run_public_ws_stream() -> JoinHandle<eyre::Result<TradeCache>> {
             "method": "subscribe",
             "subscription": {
                 "type": "trades",
-                "coin": coin
+                "coin": TRADES_COIN
             }
         });
-        let mut public_ws_stream = spawn_hl_trades_websocket(TRADES_COIN)?;
+        let mut public_ws_stream = spawn_hl_trades_websocket(TRADES_COIN, subscription)?;
         set_hl_websocket_read_timeout(
             &mut public_ws_stream,
             Some(Duration::from_millis(PUBLIC_WS_READ_TIMEOUT_MS))
@@ -117,7 +117,9 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
             };
 
             let stream_received_at_ns = unix_timestamp().as_nanos();
-            let HyperliquidData::Trades(trades) = data;
+            let HyperliquidData::Trades(trades) = data else {
+                continue;
+            };
             cache.new_pipeline_trades(trades, stream_received_at_ns);
 
             if !IS_RUNNING.load(Ordering::Relaxed) {
