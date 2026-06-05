@@ -34,6 +34,8 @@ use crate::{
 // Multiply all sizes and prices by 10^MAX_DECIMALS for ease of computation.
 const PRICE_MULTIPLIER: f64 = 100_000_000.0;
 const FETCH_SNAPSHOT_SLEEP_TIME_SEC: u64 = 5;
+// Streaming rows for a block can arrive after later blocks are observed.
+const STREAMING_FINALIZATION_BLOCK_DELAY: u64 = 64;
 
 #[derive(Default)]
 pub struct OrderBookDeriver {
@@ -139,6 +141,7 @@ impl OrderBookDeriver {
         self.order_books = snapshots.into_orderbooks(self.ignore_spot)?;
         self.snapshot_height = Some(height);
         self.book_time = 0;
+        self.push_ready_streaming_batches()?;
 
         if let Err(error) = self.apply_cached_batches() {
             println!(
@@ -228,6 +231,14 @@ impl OrderBookDeriver {
     }
 
     fn push_ready_streaming_batches(&mut self) -> eyre::Result<()> {
+        let Some(snapshot_height) = self.snapshot_height else {
+            return Ok(());
+        };
+        let next_block = snapshot_height
+            .checked_add(1)
+            .ok_or_else(|| eyre::eyre!("l4 order book snapshot height overflow"))?;
+        self.streaming_block_cache.start_at(next_block);
+
         for (order_statuses, book_diffs) in self.streaming_block_cache.pop_ready_batches() {
             self.order_status_cache.push(order_statuses)?;
             self.book_diff_cache.push(book_diffs)?;
@@ -438,17 +449,11 @@ impl OrderBookDeriver {
             .checked_add(1)
             .ok_or_else(|| eyre::eyre!("l4 order book snapshot height overflow"))?;
         if order_statuses.block_number != expected_height {
-            if order_statuses.events.is_empty() && book_diffs.events.is_empty() {
-                self.snapshot_height = Some(order_statuses.block_number);
-                self.book_time = order_statuses.time;
-                return Ok(false);
-            }
-            println!(
-                "[orderbook deriver] advancing across empty block gap expected_block={} \
-                 next_update_block={}",
-                expected_height, order_statuses.block_number
-            );
-            self.snapshot_height = order_statuses.block_number.checked_sub(1);
+            return Err(eyre::eyre!(
+                "expecting block {}, got block {}",
+                expected_height,
+                order_statuses.block_number
+            ));
         }
 
         self.apply_updates(&order_statuses.events, &book_diffs.events)?;
@@ -713,6 +718,17 @@ impl StreamingBlockCache {
         out
     }
 
+    fn start_at(&mut self, block_number: u64) {
+        let next_block = self
+            .next_block_to_finalize
+            .map_or(block_number, |next_block| next_block.max(block_number));
+        self.next_block_to_finalize = Some(next_block);
+        self.order_statuses
+            .retain(|block_number, _| *block_number >= next_block);
+        self.book_diffs
+            .retain(|block_number, _| *block_number >= next_block);
+    }
+
     fn order_status_batch_count(&self) -> usize {
         self.order_statuses.len()
     }
@@ -727,10 +743,11 @@ impl StreamingBlockCache {
     }
 
     fn ready_upper_exclusive(&self) -> Option<u64> {
-        Some(
-            self.latest_order_status_block?
-                .min(self.latest_book_diff_block?)
-        )
+        let lower_watermark = self
+            .latest_order_status_block?
+            .min(self.latest_book_diff_block?);
+
+        lower_watermark.checked_sub(STREAMING_FINALIZATION_BLOCK_DELAY - 1)
     }
 
     fn first_pending_block(&self) -> Option<u64> {
@@ -1469,22 +1486,28 @@ mod tests {
     }
 
     fn flush_block(deriver: &mut OrderBookDeriver, block_number: u64) -> Vec<HyperliquidData> {
-        let next_block = block_number + 1;
-        deriver
-            .handle_data(&HyperliquidDirDataWithMeta {
-                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
-                    next_block
-                )]),
-                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
-            })
-            .unwrap();
-        deriver
-            .handle_data(&HyperliquidDirDataWithMeta {
-                data:          HyperliquidDirData::NodeRawBookDiffs(vec![empty_diff_row(
-                    next_block
-                )]),
-                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
-            })
-            .unwrap()
+        let mut out = Vec::new();
+
+        for offset in 1..=super::STREAMING_FINALIZATION_BLOCK_DELAY {
+            let next_block = block_number + offset;
+            deriver
+                .handle_data(&HyperliquidDirDataWithMeta {
+                    data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
+                        next_block
+                    )]),
+                    pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+                })
+                .unwrap();
+            out = deriver
+                .handle_data(&HyperliquidDirDataWithMeta {
+                    data:          HyperliquidDirData::NodeRawBookDiffs(vec![empty_diff_row(
+                        next_block
+                    )]),
+                    pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+                })
+                .unwrap();
+        }
+
+        out
     }
 }
