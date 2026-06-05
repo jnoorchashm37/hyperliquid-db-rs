@@ -39,6 +39,7 @@ const FETCH_SNAPSHOT_SLEEP_TIME_SEC: u64 = 5;
 pub struct OrderBookDeriver {
     order_status_cache:          BatchQueue<L4OrderStatus>,
     book_diff_cache:             BatchQueue<L4BookDiff>,
+    streaming_block_cache:       StreamingBlockCache,
     order_books:                 BTreeMap<String, OrderBook>,
     state_snapshot:              StateSnapshotFetcher,
     snapshot_height:             Option<u64>,
@@ -67,7 +68,15 @@ impl OrderBookDeriver {
     }
 
     pub fn pending_batch_count(&self) -> usize {
-        self.order_status_cache.len() + self.book_diff_cache.len()
+        self.pending_order_status_batch_count() + self.pending_book_diff_batch_count()
+    }
+
+    fn pending_order_status_batch_count(&self) -> usize {
+        self.order_status_cache.len() + self.streaming_block_cache.order_status_batch_count()
+    }
+
+    fn pending_book_diff_batch_count(&self) -> usize {
+        self.book_diff_cache.len() + self.streaming_block_cache.book_diff_batch_count()
     }
 
     pub fn is_ready(&self) -> bool {
@@ -112,8 +121,8 @@ impl OrderBookDeriver {
                 println!(
                     "[orderbook deriver] waiting for state snapshot before emitting books; \
                      pending_order_status_batches={} pending_book_diff_batches={}",
-                    self.order_status_cache.len(),
-                    self.book_diff_cache.len()
+                    self.pending_order_status_batch_count(),
+                    self.pending_book_diff_batch_count()
                 );
                 self.logged_waiting_for_snapshot = true;
             }
@@ -123,8 +132,8 @@ impl OrderBookDeriver {
         println!(
             "[orderbook deriver] initializing from snapshot height={height}; \
              pending_order_status_batches={} pending_book_diff_batches={}",
-            self.order_status_cache.len(),
-            self.book_diff_cache.len()
+            self.pending_order_status_batch_count(),
+            self.pending_book_diff_batch_count()
         );
 
         self.order_books = snapshots.into_orderbooks(self.ignore_spot)?;
@@ -184,14 +193,15 @@ impl OrderBookDeriver {
                 .cloned()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?;
-            self.order_status_cache.push(CachedBatch::new(
+            self.streaming_block_cache.push_order_statuses(
                 row.block_number,
                 row.block_time_unix_ms()?,
                 events,
                 fs_data
-            ))?;
+            );
         }
 
+        self.push_ready_streaming_batches()?;
         Ok(())
     }
 
@@ -201,7 +211,7 @@ impl OrderBookDeriver {
         fs_data: &Arc<FsOutData>
     ) -> eyre::Result<()> {
         for row in rows {
-            self.book_diff_cache.push(CachedBatch::new(
+            self.streaming_block_cache.push_book_diffs(
                 row.block_number,
                 row.block_time_unix_ms()?,
                 row.events
@@ -210,7 +220,17 @@ impl OrderBookDeriver {
                     .map(TryInto::try_into)
                     .collect::<Result<Vec<_>, _>>()?,
                 fs_data
-            ))?;
+            );
+        }
+
+        self.push_ready_streaming_batches()?;
+        Ok(())
+    }
+
+    fn push_ready_streaming_batches(&mut self) -> eyre::Result<()> {
+        for (order_statuses, book_diffs) in self.streaming_block_cache.pop_ready_batches() {
+            self.order_status_cache.push(order_statuses)?;
+            self.book_diff_cache.push(book_diffs)?;
         }
 
         Ok(())
@@ -418,11 +438,17 @@ impl OrderBookDeriver {
             .checked_add(1)
             .ok_or_else(|| eyre::eyre!("l4 order book snapshot height overflow"))?;
         if order_statuses.block_number != expected_height {
-            return Err(eyre::eyre!(
-                "expecting block {}, got block {}",
-                expected_height,
-                order_statuses.block_number
-            ));
+            if order_statuses.events.is_empty() && book_diffs.events.is_empty() {
+                self.snapshot_height = Some(order_statuses.block_number);
+                self.book_time = order_statuses.time;
+                return Ok(false);
+            }
+            println!(
+                "[orderbook deriver] advancing across empty block gap expected_block={} \
+                 next_update_block={}",
+                expected_height, order_statuses.block_number
+            );
+            self.snapshot_height = order_statuses.block_number.checked_sub(1);
         }
 
         self.apply_updates(&order_statuses.events, &book_diffs.events)?;
@@ -503,8 +529,8 @@ impl HyperliquidDataProcessorHandle for OrderBookDeriver {
                     "[orderbook deriver] received {} order-status rows; \
                      pending_order_status_batches={} pending_book_diff_batches={}",
                     rows.len(),
-                    self.order_status_cache.len(),
-                    self.book_diff_cache.len()
+                    self.pending_order_status_batch_count(),
+                    self.pending_book_diff_batch_count()
                 );
             }
             HyperliquidDirData::NodeRawBookDiffs(rows) => {
@@ -513,8 +539,8 @@ impl HyperliquidDataProcessorHandle for OrderBookDeriver {
                     "[orderbook deriver] received {} raw-book-diff rows; \
                      pending_order_status_batches={} pending_book_diff_batches={}",
                     rows.len(),
-                    self.order_status_cache.len(),
-                    self.book_diff_cache.len()
+                    self.pending_order_status_batch_count(),
+                    self.pending_book_diff_batch_count()
                 );
             }
             _ => return Ok(Vec::new())
@@ -574,10 +600,163 @@ struct CachedBatch<T> {
 }
 
 impl<T> CachedBatch<T> {
-    fn new(block_number: u64, time: u64, events: Vec<T>, fs_data: &FsOutData) -> Self {
-        let mut pipeline_meta = ParsedDataPipelineMeta::default();
-        pipeline_meta.modify_with_fs_data(fs_data);
+    fn from_meta(
+        block_number: u64,
+        time: u64,
+        events: Vec<T>,
+        pipeline_meta: ParsedDataPipelineMeta
+    ) -> Self {
         Self { block_number, time, events, pipeline_meta }
+    }
+}
+
+#[derive(Default)]
+struct StreamingBlockCache {
+    order_statuses:            BTreeMap<u64, AccumulatedBatch<L4OrderStatus>>,
+    book_diffs:                BTreeMap<u64, AccumulatedBatch<L4BookDiff>>,
+    latest_order_status_block: Option<u64>,
+    latest_book_diff_block:    Option<u64>,
+    next_block_to_finalize:    Option<u64>,
+    last_finalized_time:       u64
+}
+
+impl StreamingBlockCache {
+    fn push_order_statuses(
+        &mut self,
+        block_number: u64,
+        time: u64,
+        events: Vec<L4OrderStatus>,
+        fs_data: &FsOutData
+    ) {
+        if self.is_finalized(block_number) {
+            return;
+        }
+
+        self.latest_order_status_block = Some(
+            self.latest_order_status_block
+                .map_or(block_number, |latest| latest.max(block_number))
+        );
+        self.order_statuses
+            .entry(block_number)
+            .or_insert_with(|| AccumulatedBatch::new(time))
+            .extend(time, events, fs_data);
+    }
+
+    fn push_book_diffs(
+        &mut self,
+        block_number: u64,
+        time: u64,
+        events: Vec<L4BookDiff>,
+        fs_data: &FsOutData
+    ) {
+        if self.is_finalized(block_number) {
+            return;
+        }
+
+        self.latest_book_diff_block = Some(
+            self.latest_book_diff_block
+                .map_or(block_number, |latest| latest.max(block_number))
+        );
+        self.book_diffs
+            .entry(block_number)
+            .or_insert_with(|| AccumulatedBatch::new(time))
+            .extend(time, events, fs_data);
+    }
+
+    fn pop_ready_batches(&mut self) -> Vec<(CachedBatch<L4OrderStatus>, CachedBatch<L4BookDiff>)> {
+        let Some(ready_upper_exclusive) = self.ready_upper_exclusive() else {
+            return Vec::new();
+        };
+        let Some(mut block_number) = self
+            .next_block_to_finalize
+            .or_else(|| self.first_pending_block())
+        else {
+            return Vec::new();
+        };
+
+        let mut out = Vec::new();
+        while block_number < ready_upper_exclusive {
+            let order_statuses = self.order_statuses.remove(&block_number);
+            let book_diffs = self.book_diffs.remove(&block_number);
+            let time = order_statuses
+                .as_ref()
+                .map(|batch| batch.time)
+                .or_else(|| book_diffs.as_ref().map(|batch| batch.time))
+                .unwrap_or(self.last_finalized_time);
+            let order_status_meta = order_statuses
+                .as_ref()
+                .map(|batch| batch.pipeline_meta.clone())
+                .or_else(|| book_diffs.as_ref().map(|batch| batch.pipeline_meta.clone()))
+                .unwrap_or_default();
+            let book_diff_meta = book_diffs
+                .as_ref()
+                .map(|batch| batch.pipeline_meta.clone())
+                .or_else(|| {
+                    order_statuses
+                        .as_ref()
+                        .map(|batch| batch.pipeline_meta.clone())
+                })
+                .unwrap_or_default();
+            let order_status_events = order_statuses.map(|batch| batch.events).unwrap_or_default();
+            let book_diff_events = book_diffs.map(|batch| batch.events).unwrap_or_default();
+
+            out.push((
+                CachedBatch::from_meta(block_number, time, order_status_events, order_status_meta),
+                CachedBatch::from_meta(block_number, time, book_diff_events, book_diff_meta)
+            ));
+
+            self.last_finalized_time = time;
+            block_number += 1;
+        }
+
+        self.next_block_to_finalize = Some(block_number);
+        out
+    }
+
+    fn order_status_batch_count(&self) -> usize {
+        self.order_statuses.len()
+    }
+
+    fn book_diff_batch_count(&self) -> usize {
+        self.book_diffs.len()
+    }
+
+    fn is_finalized(&self, block_number: u64) -> bool {
+        self.next_block_to_finalize
+            .is_some_and(|next_block| block_number < next_block)
+    }
+
+    fn ready_upper_exclusive(&self) -> Option<u64> {
+        Some(
+            self.latest_order_status_block?
+                .min(self.latest_book_diff_block?)
+        )
+    }
+
+    fn first_pending_block(&self) -> Option<u64> {
+        self.order_statuses
+            .keys()
+            .chain(self.book_diffs.keys())
+            .min()
+            .copied()
+    }
+}
+
+struct AccumulatedBatch<T> {
+    time:          u64,
+    events:        Vec<T>,
+    pipeline_meta: ParsedDataPipelineMeta
+}
+
+impl<T> AccumulatedBatch<T> {
+    fn new(time: u64) -> Self {
+        Self { time, events: Vec::new(), pipeline_meta: ParsedDataPipelineMeta::default() }
+    }
+
+    fn extend(&mut self, time: u64, events: Vec<T>, fs_data: &FsOutData) {
+        self.time = time;
+        self.events.extend(events);
+        self.pipeline_meta.modify_with_fs_data(fs_data);
     }
 }
 
@@ -713,12 +892,17 @@ mod tests {
             })
             .unwrap()
             .into_iter()
-            .next()
-            .expect("matched batches should emit an l4 update");
+            .next();
 
-        let HyperliquidData::L4Book(books) = second else { unreachable!() };
+        assert!(second.is_none());
+
+        let out = flush_block(&mut deriver, 1019927125)
+            .into_iter()
+            .next()
+            .expect("matched batches should emit an l4 update after both streams advance");
+
+        let HyperliquidData::L4Book(books) = out else { unreachable!() };
         assert_eq!(books.len(), 1);
-        assert_eq!(deriver.pending_batch_count(), 0);
         assert_eq!(deriver.order_count(), 1);
 
         let L4Book::Updates(update) = &books[0].data else { unreachable!() };
@@ -781,6 +965,9 @@ mod tests {
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
             })
             .unwrap();
+
+        assert!(out.is_empty());
+        let out = flush_block(&mut deriver, 1019927125);
 
         assert_eq!(out.len(), 2);
 
@@ -861,6 +1048,9 @@ mod tests {
             })
             .unwrap();
 
+        assert!(out.is_empty());
+        let out = flush_block(&mut deriver, 1019927125);
+
         assert_eq!(out.len(), 1);
         assert!(matches!(out[0], HyperliquidData::L2Book(_)));
     }
@@ -886,6 +1076,9 @@ mod tests {
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
             })
             .unwrap();
+
+        assert!(second.is_empty());
+        let second = flush_block(&mut deriver, 1019927125);
 
         assert_eq!(second.len(), 1);
         let HyperliquidData::L2Book(books) = &second[0] else { unreachable!() };
@@ -933,6 +1126,9 @@ mod tests {
             })
             .unwrap();
 
+        assert!(out.is_empty());
+        let out = flush_block(&mut deriver, 1019927125);
+
         assert_eq!(out.len(), 1);
         let HyperliquidData::L2Book(books) = &out[0] else { unreachable!() };
         assert_eq!(books.len(), 1);
@@ -973,14 +1169,82 @@ mod tests {
             .next();
 
         assert!(out.is_none());
+        let out = flush_block(&mut deriver, 1019927125).into_iter().next();
+
+        assert!(out.is_none());
         assert!(!deriver.is_ready());
         assert_eq!(deriver.order_count(), 0);
+    }
+
+    #[test]
+    fn merges_multiple_streaming_rows_for_same_block_before_applying() {
+        let mut deriver = ready_deriver(1019927124);
+
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![status_row()]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![diff_row()]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap();
+
+        let out = flush_block(&mut deriver, 1019927125);
+
+        let HyperliquidData::L4Book(books) = &out[0] else { unreachable!() };
+        let L4Book::Updates(update) = &books[0].data else { unreachable!() };
+        assert_eq!(update.height, 1019927125);
+        assert_eq!(update.order_statuses.len(), 1);
+        assert_eq!(update.book_diffs.len(), 1);
+        assert_eq!(deriver.order_count(), 1);
+    }
+
+    #[test]
+    fn advances_across_empty_streaming_block_gaps() {
+        let mut deriver = ready_deriver(1019927124);
+
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![status_row_for_block(
+                    1019927127
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![diff_row_for_block(
+                    1019927127
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap();
+
+        let out = flush_block(&mut deriver, 1019927127);
+
+        assert_eq!(deriver.order_count(), 1);
+        let HyperliquidData::L4Book(books) = &out[0] else { unreachable!() };
+        let L4Book::Updates(update) = &books[0].data else { unreachable!() };
+        assert_eq!(update.height, 1019927127);
     }
 
     fn deriver_without_snapshot() -> OrderBookDeriver {
         OrderBookDeriver {
             order_status_cache:          Default::default(),
             book_diff_cache:             Default::default(),
+            streaming_block_cache:       Default::default(),
             order_books:                 Default::default(),
             state_snapshot:              StateSnapshotFetcher::empty(),
             snapshot_height:             None,
@@ -1003,6 +1267,7 @@ mod tests {
         OrderBookDeriver {
             order_status_cache:          Default::default(),
             book_diff_cache:             Default::default(),
+            streaming_block_cache:       Default::default(),
             order_books:                 Default::default(),
             state_snapshot:              StateSnapshotFetcher::with_snapshot(StateSnapshot {
                 height,
@@ -1021,6 +1286,7 @@ mod tests {
         OrderBookDeriver {
             order_status_cache:          Default::default(),
             book_diff_cache:             Default::default(),
+            streaming_block_cache:       Default::default(),
             order_books:                 Default::default(),
             state_snapshot:              StateSnapshotFetcher::empty(),
             snapshot_height:             Some(height),
@@ -1087,10 +1353,34 @@ mod tests {
         .unwrap()
     }
 
+    fn status_row_for_block(block_number: u64) -> NodeOrderStatusesRows {
+        let mut row = status_row();
+        row.block_number = block_number;
+        row
+    }
+
+    fn diff_row_for_block(block_number: u64) -> NodeRawBookDiffsRows {
+        let mut row = diff_row();
+        row.block_number = block_number;
+        row
+    }
+
     fn empty_status_row(block_number: u64) -> NodeOrderStatusesRows {
         serde_json::from_str(&format!(
             r#"{{
                 "local_time":"2026-06-02T10:00:00.854461191",
+                "block_time":"2026-06-02T09:59:59.398971110",
+                "block_number":{block_number},
+                "events":[]
+            }}"#
+        ))
+        .unwrap()
+    }
+
+    fn empty_diff_row(block_number: u64) -> NodeRawBookDiffsRows {
+        serde_json::from_str(&format!(
+            r#"{{
+                "local_time":"2026-06-02T10:00:00.854322306",
                 "block_time":"2026-06-02T09:59:59.398971110",
                 "block_number":{block_number},
                 "events":[]
@@ -1176,5 +1466,25 @@ mod tests {
             notification_received_at_ns: 0,
             pipeline: Default::default()
         })
+    }
+
+    fn flush_block(deriver: &mut OrderBookDeriver, block_number: u64) -> Vec<HyperliquidData> {
+        let next_block = block_number + 1;
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
+                    next_block
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![empty_diff_row(
+                    next_block
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap()
     }
 }
