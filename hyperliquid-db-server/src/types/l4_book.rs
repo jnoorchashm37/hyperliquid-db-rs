@@ -13,7 +13,25 @@ impl TryFrom<L4Book> for RpcL4Book {
     type Error = eyre::ErrReport;
 
     fn try_from(value: L4Book) -> Result<Self, Self::Error> {
-        todo!()
+        match value {
+            L4Book::Snapshot { coin, time, height, levels } => {
+                let [bids, asks] = levels;
+                Ok(Self::Snapshot {
+                    coin,
+                    time,
+                    height,
+                    levels: [
+                        bids.into_iter()
+                            .map(TryInto::try_into)
+                            .collect::<Result<_, _>>()?,
+                        asks.into_iter()
+                            .map(TryInto::try_into)
+                            .collect::<Result<_, _>>()?
+                    ]
+                })
+            }
+            L4Book::Updates(updates) => Ok(Self::Updates(updates.try_into()?))
+        }
     }
 }
 
@@ -29,7 +47,20 @@ impl TryFrom<L4BookUpdates> for RpcL4BookUpdates {
     type Error = eyre::ErrReport;
 
     fn try_from(value: L4BookUpdates) -> Result<Self, Self::Error> {
-        todo!()
+        Ok(Self {
+            time:           value.time,
+            height:         value.height,
+            order_statuses: value
+                .order_statuses
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+            book_diffs:     value
+                .book_diffs
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?
+        })
     }
 }
 
@@ -49,7 +80,14 @@ impl TryFrom<L4OrderStatus> for RpcL4OrderStatus {
     type Error = eyre::ErrReport;
 
     fn try_from(value: L4OrderStatus) -> Result<Self, Self::Error> {
-        todo!()
+        Ok(Self {
+            time:    value.time,
+            user:    value.user,
+            hash:    value.hash,
+            builder: value.builder.map(TryInto::try_into).transpose()?,
+            status:  value.status,
+            order:   value.order.try_into()?
+        })
     }
 }
 
@@ -63,7 +101,7 @@ impl TryFrom<L4OrderBuilder> for RpcL4OrderBuilder {
     type Error = eyre::ErrReport;
 
     fn try_from(value: L4OrderBuilder) -> Result<Self, Self::Error> {
-        todo!()
+        Ok(Self { b: value.b, f: value.f })
     }
 }
 
@@ -82,7 +120,14 @@ impl TryFrom<L4BookDiff> for RpcL4BookDiff {
     type Error = eyre::ErrReport;
 
     fn try_from(value: L4BookDiff) -> Result<Self, Self::Error> {
-        todo!()
+        Ok(Self {
+            user:          value.user,
+            oid:           value.oid,
+            coin:          value.coin,
+            side:          Some(value.side.to_string()),
+            px:            decimal_string(value.px),
+            raw_book_diff: value.raw_book_diff.try_into()?
+        })
     }
 }
 
@@ -110,7 +155,23 @@ impl TryFrom<L4Order> for RpcL4Order {
     type Error = eyre::ErrReport;
 
     fn try_from(value: L4Order) -> Result<Self, Self::Error> {
-        todo!()
+        Ok(Self {
+            user:              value.user,
+            coin:              value.coin,
+            side:              value.side.to_string(),
+            limit_px:          decimal_string(value.limit_px),
+            sz:                decimal_string(value.sz),
+            oid:               value.oid,
+            timestamp:         value.timestamp,
+            trigger_condition: value.trigger_condition,
+            is_trigger:        value.is_trigger,
+            trigger_px:        decimal_string(value.trigger_px),
+            is_position_tpsl:  value.is_position_tpsl,
+            reduce_only:       value.reduce_only,
+            order_type:        value.order_type,
+            tif:               value.tif,
+            cloid:             value.cloid
+        })
     }
 }
 
@@ -126,6 +187,25 @@ impl TryFrom<L4OrderDiff> for RpcL4OrderDiff {
     type Error = eyre::ErrReport;
 
     fn try_from(value: L4OrderDiff) -> Result<Self, Self::Error> {
-        todo!()
+        match value {
+            L4OrderDiff::New { sz } => Ok(Self::New { sz: decimal_string(sz) }),
+            L4OrderDiff::Update { orig_sz, new_sz } => Ok(Self::Update {
+                orig_sz: decimal_string(orig_sz),
+                new_sz:  decimal_string(new_sz)
+            }),
+            L4OrderDiff::Remove => Ok(Self::Remove)
+        }
     }
+}
+
+fn decimal_string(value: f64) -> String {
+    let mut value = format!("{value:.8}");
+    while value.contains('.') && value.ends_with('0') {
+        value.pop();
+    }
+    if value.ends_with('.') {
+        value.push('0');
+    }
+
+    value
 }
