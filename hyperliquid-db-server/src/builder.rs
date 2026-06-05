@@ -38,13 +38,15 @@ async fn subscribe_route(ws: WebSocketUpgrade, handler: WsHandler) -> impl IntoR
 fn channel_name(kind: HyperliquidDataKind) -> &'static str {
     match kind {
         HyperliquidDataKind::Trades => "trades",
-        HyperliquidDataKind::L4Book => "l4Book"
+        HyperliquidDataKind::L4Book => "l4Book",
+        HyperliquidDataKind::L2Book => "l2Book"
     }
 }
 
 fn route_name(kind: HyperliquidDataKind) -> &'static str {
     match kind {
         HyperliquidDataKind::Trades => "/subscribeTrades",
-        HyperliquidDataKind::L4Book => "/subscribeL4Book"
+        HyperliquidDataKind::L4Book => "/subscribeL4Book",
+        HyperliquidDataKind::L2Book => "/subscribeL2Book"
     }
 }

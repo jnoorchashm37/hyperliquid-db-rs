@@ -36,7 +36,7 @@ const PRICE_MULTIPLIER: f64 = 100_000_000.0;
 const FETCH_SNAPSHOT_SLEEP_TIME_SEC: u64 = 5;
 
 #[derive(Default)]
-pub struct L4BookDeriver {
+pub struct OrderBookDeriver {
     order_status_cache: BatchQueue<L4OrderStatus>,
     book_diff_cache:    BatchQueue<L4BookDiff>,
     order_books:        BTreeMap<String, OrderBook>,
@@ -47,7 +47,7 @@ pub struct L4BookDeriver {
     ignore_spot:        bool
 }
 
-impl L4BookDeriver {
+impl OrderBookDeriver {
     pub fn new() -> Self {
         Self::default()
     }
@@ -367,7 +367,7 @@ impl L4BookDeriver {
     }
 }
 
-impl HyperliquidDataProcessorHandle for L4BookDeriver {
+impl HyperliquidDataProcessorHandle for OrderBookDeriver {
     fn handle_data(
         &mut self,
         data: &HyperliquidDirDataWithMeta
@@ -459,7 +459,7 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use super::{
-        L4BookDeriver,
+        OrderBookDeriver,
         snapshots::{StateSnapshot, StateSnapshotFetcher},
         types::{Coin, InnerL4Order, Px, Snapshot, Snapshots, Sz}
     };
@@ -605,8 +605,8 @@ mod tests {
         assert_eq!(deriver.order_count(), 0);
     }
 
-    fn deriver_without_snapshot() -> L4BookDeriver {
-        L4BookDeriver {
+    fn deriver_without_snapshot() -> OrderBookDeriver {
+        OrderBookDeriver {
             order_status_cache: Default::default(),
             book_diff_cache:    Default::default(),
             order_books:        Default::default(),
@@ -618,15 +618,15 @@ mod tests {
         }
     }
 
-    fn deriver_with_snapshot(height: u64) -> L4BookDeriver {
+    fn deriver_with_snapshot(height: u64) -> OrderBookDeriver {
         deriver_with_state_snapshot(height, Snapshots::new(HashMap::new()))
     }
 
     fn deriver_with_state_snapshot(
         height: u64,
         snapshots: Snapshots<InnerL4Order>
-    ) -> L4BookDeriver {
-        L4BookDeriver {
+    ) -> OrderBookDeriver {
+        OrderBookDeriver {
             order_status_cache: Default::default(),
             book_diff_cache:    Default::default(),
             order_books:        Default::default(),
@@ -641,8 +641,8 @@ mod tests {
         }
     }
 
-    fn ready_deriver(height: u64) -> L4BookDeriver {
-        L4BookDeriver {
+    fn ready_deriver(height: u64) -> OrderBookDeriver {
+        OrderBookDeriver {
             order_status_cache: Default::default(),
             book_diff_cache:    Default::default(),
             order_books:        Default::default(),

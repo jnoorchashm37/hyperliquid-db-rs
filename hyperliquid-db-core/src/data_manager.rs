@@ -6,7 +6,10 @@ use tokio::sync::broadcast;
 use crate::{
     fs_handlers::DirectoryWatcher,
     hl_fs::HyperliquidDirDataWithMeta,
-    processors::{HyperliquidDataProcessorHandle, L4BookDeriver, TradeDeriver},
+    processors::{
+        HyperliquidDataProcessorHandle, HyperliquidDataProcessorKind, OrderBookDeriver,
+        TradeDeriver
+    },
     types::{HyperliquidData, HyperliquidDataKind}
 };
 
@@ -47,7 +50,12 @@ impl HyperliquidDataManager {
             eyre::Ok(())
         })?;
 
-        let processors = data_kinds.iter().copied().map(kind_to_processor).collect();
+        let processors = data_kinds
+            .iter()
+            .map(HyperliquidDataKind::processor_kind)
+            .unique()
+            .map(kind_to_processor)
+            .collect();
 
         tracing::debug!("spawned data manager");
 
@@ -102,9 +110,11 @@ impl HyperliquidDataManager {
     }
 }
 
-fn kind_to_processor(kind: HyperliquidDataKind) -> Box<dyn HyperliquidDataProcessorHandle> {
+fn kind_to_processor(
+    kind: HyperliquidDataProcessorKind
+) -> Box<dyn HyperliquidDataProcessorHandle> {
     match kind {
-        HyperliquidDataKind::Trades => Box::new(TradeDeriver::new()),
-        HyperliquidDataKind::L4Book => Box::new(L4BookDeriver::new())
+        HyperliquidDataProcessorKind::Trades => Box::new(TradeDeriver::new()),
+        HyperliquidDataProcessorKind::Orderbook => Box::new(OrderBookDeriver::new())
     }
 }

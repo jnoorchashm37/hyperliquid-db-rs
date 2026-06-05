@@ -13,7 +13,10 @@ mod l2_book;
 pub use l2_book::L2Book;
 use strum::IntoEnumIterator;
 
-use crate::{fs_handlers::types::FsOutData, hl_fs::HyperliquidDirKind};
+use crate::{
+    fs_handlers::types::FsOutData, hl_fs::HyperliquidDirKind,
+    processors::HyperliquidDataProcessorKind
+};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct HyperliquidDataWithMeta<D> {
@@ -24,14 +27,16 @@ pub struct HyperliquidDataWithMeta<D> {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum HyperliquidData {
     Trades(Vec<HyperliquidDataWithMeta<Trade>>),
-    L4Book(Vec<HyperliquidDataWithMeta<L4Book>>)
+    L4Book(Vec<HyperliquidDataWithMeta<L4Book>>),
+    L2Book(Vec<HyperliquidDataWithMeta<L2Book>>)
 }
 
 impl HyperliquidData {
     pub fn kind(&self) -> HyperliquidDataKind {
         match self {
             HyperliquidData::Trades(_) => HyperliquidDataKind::Trades,
-            HyperliquidData::L4Book(_) => HyperliquidDataKind::L4Book
+            HyperliquidData::L4Book(_) => HyperliquidDataKind::L4Book,
+            HyperliquidData::L2Book(_) => HyperliquidDataKind::L2Book
         }
     }
 }
@@ -39,7 +44,8 @@ impl HyperliquidData {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter)]
 pub enum HyperliquidDataKind {
     Trades,
-    L4Book
+    L4Book,
+    L2Book
 }
 
 impl HyperliquidDataKind {
@@ -50,11 +56,20 @@ impl HyperliquidDataKind {
     pub fn required_dirs(&self) -> Vec<HyperliquidDirKind> {
         match self {
             HyperliquidDataKind::Trades => vec![HyperliquidDirKind::NodeFills],
-            HyperliquidDataKind::L4Book => vec![
+            HyperliquidDataKind::L4Book | HyperliquidDataKind::L2Book => vec![
                 HyperliquidDirKind::NodeFills,
                 HyperliquidDirKind::NodeOrderStatuses,
                 HyperliquidDirKind::NodeRawBookDiffs,
             ]
+        }
+    }
+
+    pub fn processor_kind(&self) -> HyperliquidDataProcessorKind {
+        match self {
+            HyperliquidDataKind::Trades => HyperliquidDataProcessorKind::Trades,
+            HyperliquidDataKind::L4Book | HyperliquidDataKind::L2Book => {
+                HyperliquidDataProcessorKind::Orderbook
+            }
         }
     }
 }
