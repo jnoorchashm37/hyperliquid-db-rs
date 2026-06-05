@@ -53,6 +53,13 @@ pub fn run_trades_ws_bench() -> eyre::Result<()> {
 
 fn run_public_ws_stream() -> JoinHandle<eyre::Result<TradeCache>> {
     std::thread::spawn(move || {
+        let subscription = serde_json::json!({
+            "method": "subscribe",
+            "subscription": {
+                "type": "trades",
+                "coin": coin
+            }
+        });
         let mut public_ws_stream = spawn_hl_trades_websocket(TRADES_COIN)?;
         set_hl_websocket_read_timeout(
             &mut public_ws_stream,

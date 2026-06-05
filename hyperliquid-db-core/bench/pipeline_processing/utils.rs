@@ -4,7 +4,6 @@ use hyperliquid_db_core::{
     HyperliquidDataManager,
     types::{HyperliquidData, HyperliquidDataKind}
 };
-use serde_json::json;
 use tokio::sync::broadcast;
 use tungstenite::{Message, WebSocket, connect, stream::MaybeTlsStream};
 
@@ -17,15 +16,12 @@ pub fn spawn_hl_websocket() -> eyre::Result<HlWebSocket> {
     Ok(socket)
 }
 
-pub fn spawn_hl_trades_websocket(coin: &str) -> eyre::Result<HlWebSocket> {
+pub fn spawn_hl_trades_websocket(
+    coin: &str,
+    subscription: serde_json::Value
+) -> eyre::Result<HlWebSocket> {
     let mut socket = spawn_hl_websocket()?;
-    let subscription = json!({
-        "method": "subscribe",
-        "subscription": {
-            "type": "trades",
-            "coin": coin
-        }
-    });
+
     socket.send(Message::Text(subscription.to_string().into()))?;
 
     Ok(socket)
