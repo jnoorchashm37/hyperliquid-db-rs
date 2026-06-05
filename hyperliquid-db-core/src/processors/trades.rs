@@ -98,7 +98,7 @@ mod tests {
             schemas::{NodeFillsFill, NodeFillsRow, NodeFillsSide}
         },
         processors::HyperliquidDataProcessorHandle,
-        types::{PendingTrade, TradeSide}
+        types::{PendingTrade, Side}
     };
 
     #[test]
@@ -154,7 +154,7 @@ mod tests {
             .into_trade()
             .unwrap();
 
-        assert_eq!(trade.side, TradeSide::Ask);
+        assert_eq!(trade.side, Side::Ask);
     }
 
     fn row(events: Vec<NodeFillsFill>) -> NodeFillsRow {

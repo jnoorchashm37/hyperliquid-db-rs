@@ -3,10 +3,10 @@ use std::{
     fmt::{self, Formatter}
 };
 
-use serde::{Deserialize, Serialize};
-
-// Multiply all sizes and prices by 10^MAX_DECIMALS for ease of computation.
-const MULTIPLIER: f64 = 100_000_000.0;
+use crate::{
+    processors::l4_orderbook::PRICE_MULTIPLIER,
+    types::{L4Order, Side}
+};
 
 pub struct Snapshots<O>(HashMap<Coin, Snapshot<O>>);
 
@@ -30,6 +30,10 @@ pub struct Snapshot<O>([Vec<O>; 2]);
 impl<O> Snapshot<O> {
     pub fn new(val: [Vec<O>; 2]) -> Self {
         Self(val)
+    }
+
+    pub fn into_levels(self) -> [Vec<O>; 2] {
+        self.0
     }
 }
 
@@ -184,38 +188,6 @@ impl From<InnerL4Order> for L4Order {
     }
 }
 
-// RawL4Order is the version of a L4Order we want to serialize and deserialize
-// directly
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct L4Order {
-    // when serializing, this field is found outside of this struct
-    // when deserializing, we move it into this struct
-    pub user:              Option<String>,
-    pub coin:              String,
-    pub side:              Side,
-    pub limit_px:          String,
-    pub sz:                String,
-    pub oid:               u64,
-    pub timestamp:         u64,
-    pub trigger_condition: String,
-    pub is_trigger:        bool,
-    pub trigger_px:        String,
-    pub is_position_tpsl:  bool,
-    pub reduce_only:       bool,
-    pub order_type:        String,
-    pub tif:               Option<String>,
-    pub cloid:             Option<String>
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum Side {
-    #[serde(rename = "A")]
-    Ask,
-    #[serde(rename = "B")]
-    Bid
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Oid(u64);
 
@@ -256,13 +228,13 @@ impl Px {
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::cast_sign_loss)]
     pub fn parse_from_str(value: &str) -> eyre::Result<Self> {
-        let value = (value.parse::<f64>()? * MULTIPLIER).round() as u64;
+        let value = (value.parse::<f64>()? * PRICE_MULTIPLIER).round() as u64;
         Ok(Self::new(value))
     }
 
     #[must_use]
     pub fn to_str(self) -> String {
-        let s = format!("{:.8}", (self.value() as f64) / MULTIPLIER);
+        let s = format!("{:.8}", (self.value() as f64) / PRICE_MULTIPLIER);
         let s = s.trim_end_matches('0');
         s.trim_end_matches('.').to_string()
     }
@@ -301,13 +273,13 @@ impl Sz {
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::cast_sign_loss)]
     pub fn parse_from_str(value: &str) -> eyre::Result<Self> {
-        let value = (value.parse::<f64>()? * MULTIPLIER).round() as u64;
+        let value = (value.parse::<f64>()? * PRICE_MULTIPLIER).round() as u64;
         Ok(Self::new(value))
     }
 
     #[must_use]
     pub fn to_str(self) -> String {
-        let s = format!("{:.8}", (self.value() as f64) / MULTIPLIER);
+        let s = format!("{:.8}", (self.value() as f64) / PRICE_MULTIPLIER);
         let s = s.trim_end_matches('0');
         s.trim_end_matches('.').to_string()
     }
@@ -315,12 +287,12 @@ impl Sz {
 
 impl fmt::Debug for Px {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", (self.value() as f64 / MULTIPLIER))
+        write!(f, "{}", (self.value() as f64 / PRICE_MULTIPLIER))
     }
 }
 
 impl fmt::Debug for Sz {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", (self.value() as f64 / MULTIPLIER))
+        write!(f, "{}", (self.value() as f64 / PRICE_MULTIPLIER))
     }
 }

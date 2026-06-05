@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     processors::l4_orderbook::{
         FETCH_SNAPSHOT_SLEEP_TIME_SEC,
-        types::{Coin, InnerL4Order, L4Order, Snapshot, Snapshots}
+        types::{Coin, InnerL4Order, Snapshot, Snapshots}
     },
+    types::L4Order,
     utils::unix_timestamp
 };
 
@@ -24,6 +25,16 @@ impl StateSnapshotFetcher {
         this.fetch_new();
 
         this
+    }
+
+    #[cfg(test)]
+    pub fn empty() -> Self {
+        Self(Arc::new(Mutex::new(None)))
+    }
+
+    #[cfg(test)]
+    pub fn with_snapshot(snapshot: StateSnapshot) -> Self {
+        Self(Arc::new(Mutex::new(Some(snapshot))))
     }
 
     pub fn read<T>(&self, f: impl FnOnce(&Option<StateSnapshot>) -> T) -> eyre::Result<T> {

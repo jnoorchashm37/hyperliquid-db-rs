@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::types::Side;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum L4Book {
     Snapshot { coin: String, time: u64, height: u64, levels: [Vec<L4Order>; 2] },
@@ -44,7 +46,7 @@ pub struct L4BookDiff {
     pub oid:           u64,
     pub coin:          String,
     #[serde(default)]
-    pub side:          Option<L4Side>,
+    pub side:          Option<Side>,
     pub px:            String,
     pub raw_book_diff: L4OrderDiff
 }
@@ -54,7 +56,7 @@ pub struct L4BookDiff {
 pub struct L4Order {
     pub user:              Option<String>,
     pub coin:              String,
-    pub side:              L4Side,
+    pub side:              Side,
     pub limit_px:          String,
     pub sz:                String,
     pub oid:               u64,
@@ -69,12 +71,10 @@ pub struct L4Order {
     pub cloid:             Option<String>
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum L4Side {
-    #[serde(rename = "A")]
-    Ask,
-    #[serde(rename = "B")]
-    Bid
+impl L4Order {
+    pub fn order_size(&self) -> eyre::Result<f64> {
+        Ok(self.sz.parse()?)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

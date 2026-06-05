@@ -2,10 +2,13 @@ mod trades;
 
 mod l4_orderbook;
 pub use l4_orderbook::{
-    L4Book, L4BookDiff, L4BookUpdates, L4Order, L4OrderBuilder, L4OrderDiff, L4OrderStatus, L4Side
+    L4Book, L4BookDiff, L4BookUpdates, L4Order, L4OrderBuilder, L4OrderDiff, L4OrderStatus
 };
+
+mod common;
+pub use common::*;
 use serde::{Deserialize, Serialize};
-pub use trades::{PendingTrade, Trade, TradeSide};
+pub use trades::{PendingTrade, Trade};
 mod l2_orderbook;
 pub use l2_orderbook::L2Book;
 use strum::IntoEnumIterator;

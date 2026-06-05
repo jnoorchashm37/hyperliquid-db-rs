@@ -1,25 +1,17 @@
 use serde::{Deserialize, Serialize};
 
-use crate::hl_fs::schemas::NodeFillsFill;
+use crate::{hl_fs::schemas::NodeFillsFill, types::Side};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Serialize, Deserialize, Hash)]
 pub struct Trade {
     pub coin:  String,
-    pub side:  TradeSide,
+    pub side:  Side,
     pub px:    String,
     pub sz:    String,
     pub hash:  String,
     pub time:  u64,
     pub tid:   u64,
     pub users: [String; 2]
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum TradeSide {
-    #[serde(rename = "A")]
-    Ask,
-    #[serde(rename = "B")]
-    Bid
 }
 
 #[derive(Default)]
@@ -62,7 +54,7 @@ impl PendingTrade {
             ));
         }
 
-        let side = if ask.crossed { TradeSide::Ask } else { TradeSide::Bid };
+        let side = if ask.crossed { Side::Ask } else { Side::Bid };
 
         Ok(Trade {
             coin: ask.coin,

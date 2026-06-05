@@ -1,30 +1,37 @@
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, VecDeque},
-    env::home_dir,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex}
+    sync::Arc
 };
 
+pub mod book;
 pub mod snapshots;
 pub mod types;
 
 use serde_json::Value;
 
+use self::{
+    snapshots::{StateSnapshot, StateSnapshotFetcher},
+    types::Snapshots as StateSnapshots
+};
 use crate::{
     fs_handlers::types::FsOutData,
     hl_fs::{
         HyperliquidDirData, HyperliquidDirDataWithMeta,
         schemas::{NodeOrderStatusesRows, NodeRawBookDiffsRows}
     },
-    processors::{HyperliquidDataProcessorHandle, l4_orderbook::snapshots::StateSnapshotFetcher},
+    processors::{
+        HyperliquidDataProcessorHandle,
+        l4_orderbook::{book::OrderBook, types::InnerL4Order}
+    },
     types::{
         HyperliquidData, HyperliquidDataWithMeta, L4Book, L4BookDiff, L4BookUpdates, L4Order,
-        L4OrderBuilder, L4OrderDiff, L4OrderStatus, L4Side, ParsedDataPipelineMeta
+        L4OrderBuilder, L4OrderDiff, L4OrderStatus, ParsedDataPipelineMeta, Side
     },
     utils::unix_timestamp
 };
 
+// Multiply all sizes and prices by 10^MAX_DECIMALS for ease of computation.
 const PRICE_MULTIPLIER: f64 = 100_000_000.0;
 const FETCH_SNAPSHOT_SLEEP_TIME_SEC: u64 = 5;
 
@@ -34,7 +41,7 @@ pub struct L4BookDeriver {
     book_diff_cache:    BatchQueue<L4BookDiff>,
     order_books:        HashMap<String, OrderBook>,
     state_snapshot:     StateSnapshotFetcher,
-    snapshot_loaded:    bool
+    snapshot_height:    Option<u64>
 }
 
 impl L4BookDeriver {
@@ -48,6 +55,44 @@ impl L4BookDeriver {
 
     pub fn pending_batch_count(&self) -> usize {
         self.order_status_cache.len() + self.book_diff_cache.len()
+    }
+
+    fn is_ready(&self) -> bool {
+        self.snapshot_height.is_some()
+    }
+
+    fn try_initialize_from_snapshot(&mut self) -> eyre::Result<bool> {
+        if self.is_ready() {
+            return Ok(true);
+        }
+
+        let Some(StateSnapshot { height, snapshots }) = self.state_snapshot.write(Option::take)?
+        else {
+            return Ok(false);
+        };
+
+        self.order_books = order_books_from_snapshot(snapshots)?;
+        self.snapshot_height = Some(height);
+
+        if let Err(error) = self.apply_cached_batches() {
+            tracing::info!(
+                ?error,
+                "Failed to apply updates to this book (likely missing older updates). Waiting for \
+                 next snapshot."
+            );
+            self.order_books.clear();
+            self.snapshot_height = None;
+            self.state_snapshot.fetch_new();
+            return Ok(false);
+        }
+
+        tracing::info!(
+            snapshot_height = height,
+            current_height = self.snapshot_height.unwrap_or(height),
+            order_count = self.order_count(),
+            "l4 order book ready"
+        );
+        Ok(true)
     }
 
     fn receive_order_statuses(
@@ -106,11 +151,9 @@ impl L4BookDeriver {
         let mut out = Vec::new();
 
         while let Some((order_statuses, book_diffs)) = self.pop_cache() {
-            if order_statuses.block_number != book_diffs.block_number {
-                return Err(eyre::eyre!("expected synchronized order status and book diff batches"));
+            if !self.apply_cached_batch(&order_statuses, &book_diffs)? {
+                continue;
             }
-
-            self.apply_updates(&order_statuses.events, &book_diffs.events)?;
 
             let mut pipeline_meta =
                 combine_pipeline_meta(order_statuses.pipeline_meta, book_diffs.pipeline_meta);
@@ -131,6 +174,48 @@ impl L4BookDeriver {
         }
 
         Ok(out)
+    }
+
+    fn apply_cached_batches(&mut self) -> eyre::Result<()> {
+        while let Some((order_statuses, book_diffs)) = self.pop_cache() {
+            self.apply_cached_batch(&order_statuses, &book_diffs)?;
+        }
+
+        Ok(())
+    }
+
+    fn apply_cached_batch(
+        &mut self,
+        order_statuses: &CachedBatch<L4OrderStatus>,
+        book_diffs: &CachedBatch<L4BookDiff>
+    ) -> eyre::Result<bool> {
+        if order_statuses.block_number != book_diffs.block_number {
+            return Err(eyre::eyre!("expected synchronized order status and book diff batches"));
+        }
+
+        let Some(current_height) = self.snapshot_height else {
+            return Err(eyre::eyre!("cannot apply l4 order book batch before snapshot"));
+        };
+
+        if order_statuses.block_number <= current_height {
+            return Ok(false);
+        }
+
+        let expected_height = current_height
+            .checked_add(1)
+            .ok_or_else(|| eyre::eyre!("l4 order book snapshot height overflow"))?;
+        if order_statuses.block_number != expected_height {
+            return Err(eyre::eyre!(
+                "expecting block {}, got block {}",
+                expected_height,
+                order_statuses.block_number
+            ));
+        }
+
+        self.apply_updates(&order_statuses.events, &book_diffs.events)?;
+        self.snapshot_height = Some(order_statuses.block_number);
+
+        Ok(true)
     }
 
     fn apply_updates(
@@ -201,6 +286,10 @@ impl HyperliquidDataProcessorHandle for L4BookDeriver {
             _ => return Ok(None)
         }
 
+        if !self.try_initialize_from_snapshot()? {
+            return Ok(None);
+        }
+
         let updates = self.process_ready_batches(processing_data_at_ns)?;
         if updates.is_empty() { Ok(None) } else { Ok(Some(HyperliquidData::L4Book(updates))) }
     }
@@ -253,145 +342,40 @@ impl<T> BatchQueue<T> {
     }
 }
 
-#[derive(Default)]
-struct OrderBook {
-    oid_to_side_px: HashMap<u64, (L4Side, i64)>,
-    bids:           BTreeMap<i64, VecDeque<L4Order>>,
-    asks:           BTreeMap<i64, VecDeque<L4Order>>
+fn order_books_from_snapshot(
+    snapshots: StateSnapshots<InnerL4Order>
+) -> eyre::Result<HashMap<String, OrderBook>> {
+    let mut order_books = HashMap::new();
+
+    for (coin, snapshot) in snapshots.value() {
+        let mut order_book = OrderBook::default();
+        for order in snapshot.into_levels().into_iter().flatten() {
+            order_book.add_order(order_from_snapshot_order(order))?;
+        }
+        order_books.insert(coin.value(), order_book);
+    }
+
+    Ok(order_books)
 }
 
-impl OrderBook {
-    fn order_count(&self) -> usize {
-        self.oid_to_side_px.len()
+fn order_from_snapshot_order(order: InnerL4Order) -> L4Order {
+    L4Order {
+        user:              Some(order.user),
+        coin:              order.coin.value(),
+        side:              order.side,
+        limit_px:          order.limit_px.to_str(),
+        sz:                order.sz.to_str(),
+        oid:               order.oid,
+        timestamp:         order.timestamp,
+        trigger_condition: order.trigger_condition,
+        is_trigger:        order.is_trigger,
+        trigger_px:        order.trigger_px,
+        is_position_tpsl:  order.is_position_tpsl,
+        reduce_only:       order.reduce_only,
+        order_type:        order.order_type,
+        tif:               order.tif,
+        cloid:             order.cloid
     }
-
-    fn add_order(&mut self, mut order: L4Order) -> eyre::Result<()> {
-        let filled_oids = self.match_order(&mut order)?;
-        for oid in filled_oids {
-            self.oid_to_side_px.remove(&oid);
-        }
-
-        if order_size(&order)? > 0.0 {
-            let oid = order.oid;
-            let side = order.side;
-            let px = price_key(&order.limit_px)?;
-            self.oid_to_side_px.insert(oid, (side, px));
-            match side {
-                L4Side::Ask => self.asks.entry(px).or_default().push_back(order),
-                L4Side::Bid => self.bids.entry(px).or_default().push_back(order)
-            }
-        }
-
-        Ok(())
-    }
-
-    fn cancel_order(&mut self, oid: u64) -> bool {
-        let Some((side, px)) = self.oid_to_side_px.remove(&oid) else {
-            return false;
-        };
-
-        let map = match side {
-            L4Side::Ask => &mut self.asks,
-            L4Side::Bid => &mut self.bids
-        };
-
-        let Some(orders) = map.get_mut(&px) else {
-            return false;
-        };
-
-        let Some(idx) = orders.iter().position(|order| order.oid == oid) else {
-            return false;
-        };
-
-        orders.remove(idx);
-        if orders.is_empty() {
-            map.remove(&px);
-        }
-
-        true
-    }
-
-    fn modify_sz(&mut self, oid: u64, sz: String) -> bool {
-        let Some((side, px)) = self.oid_to_side_px.get(&oid).copied() else {
-            return false;
-        };
-
-        let map = match side {
-            L4Side::Ask => &mut self.asks,
-            L4Side::Bid => &mut self.bids
-        };
-
-        let Some(orders) = map.get_mut(&px) else {
-            return false;
-        };
-
-        let Some(order) = orders.iter_mut().find(|order| order.oid == oid) else {
-            return false;
-        };
-
-        order.sz = sz;
-        true
-    }
-
-    fn match_order(&mut self, taker_order: &mut L4Order) -> eyre::Result<Vec<u64>> {
-        let limit_px = price_key(&taker_order.limit_px)?;
-        let filled_oids = match taker_order.side {
-            L4Side::Ask => {
-                let keys = self
-                    .bids
-                    .range(limit_px..)
-                    .rev()
-                    .map(|(px, _)| *px)
-                    .collect();
-                match_orders_at_prices(&mut self.bids, taker_order, keys)?
-            }
-            L4Side::Bid => {
-                let keys = self.asks.range(..=limit_px).map(|(px, _)| *px).collect();
-                match_orders_at_prices(&mut self.asks, taker_order, keys)?
-            }
-        };
-
-        Ok(filled_oids)
-    }
-}
-
-fn match_orders_at_prices(
-    maker_orders: &mut BTreeMap<i64, VecDeque<L4Order>>,
-    taker_order: &mut L4Order,
-    prices: Vec<i64>
-) -> eyre::Result<Vec<u64>> {
-    let mut filled_oids = Vec::new();
-
-    for price in prices {
-        if order_size(taker_order)? <= 0.0 {
-            break;
-        }
-
-        let mut empty_level = false;
-        if let Some(level) = maker_orders.get_mut(&price) {
-            while order_size(taker_order)? > 0.0 {
-                let Some(maker_order) = level.front_mut() else {
-                    break;
-                };
-
-                let match_sz = order_size(taker_order)?.min(order_size(maker_order)?);
-                decrement_order_size(taker_order, match_sz)?;
-                decrement_order_size(maker_order, match_sz)?;
-
-                if order_size(maker_order)? <= 0.0 {
-                    filled_oids.push(maker_order.oid);
-                    level.pop_front();
-                }
-            }
-            empty_level = level.is_empty();
-        }
-
-        if empty_level {
-            maker_orders.remove(&price);
-        }
-    }
-
-    Ok(filled_oids)
 }
 
 fn order_status_batch(
@@ -441,18 +425,18 @@ fn builder_from_value(value: &Value) -> eyre::Result<L4OrderBuilder> {
     Ok(L4OrderBuilder { b: string_field(value, "b")?.to_string(), f: u64_field(value, "f")? })
 }
 
-fn book_diff_from_value(value: &Value) -> eyre::Result<L4BookDiff> {
-    Ok(L4BookDiff {
-        user:          string_field(value, "user")?.to_string(),
-        oid:           u64_field(value, "oid")?,
-        coin:          string_field(value, "coin")?.to_string(),
-        side:          optional_string_field(value, "side")?
-            .map(|side| side_from_str(&side))
-            .transpose()?,
-        px:            decimal_string(json_field(value, "px")?)?,
-        raw_book_diff: order_diff_from_value(json_field(value, "raw_book_diff")?)?
-    })
-}
+// fn book_diff_from_value(value: &Value) -> eyre::Result<L4BookDiff> {
+//     Ok(L4BookDiff {
+//         user:          string_field(value, "user")?.to_string(),
+//         oid:           u64_field(value, "oid")?,
+//         coin:          string_field(value, "coin")?.to_string(),
+//         side:          optional_string_field(value, "side")?
+//             .map(|side| side_from_str(&side))
+//             .transpose()?,
+//         px:            decimal_string(json_field(value, "px")?)?,
+//         raw_book_diff: order_diff_from_value(json_field(value,
+// "raw_book_diff")?)?     })
+// }
 
 fn order_from_value(value: &Value) -> eyre::Result<L4Order> {
     Ok(L4Order {
@@ -541,24 +525,10 @@ fn convert_trigger(order: &mut L4Order, status_time: &str) -> eyre::Result<()> {
     Ok(())
 }
 
-fn decrement_order_size(order: &mut L4Order, dec: f64) -> eyre::Result<()> {
-    let new_size = (order_size(order)? - dec).max(0.0);
-    order.sz = format_decimal(new_size);
-    Ok(())
-}
-
-fn order_size(order: &L4Order) -> eyre::Result<f64> {
-    Ok(order.sz.parse()?)
-}
-
-fn price_key(px: &str) -> eyre::Result<i64> {
-    Ok((px.parse::<f64>()? * PRICE_MULTIPLIER).round() as i64)
-}
-
-fn side_from_str(side: &str) -> eyre::Result<L4Side> {
+fn side_from_str(side: &str) -> eyre::Result<Side> {
     match side {
-        "A" => Ok(L4Side::Ask),
-        "B" => Ok(L4Side::Bid),
+        "A" => Ok(Side::Ask),
+        "B" => Ok(Side::Bid),
         _ => Err(eyre::eyre!("invalid L4 side: {side}"))
     }
 }
@@ -707,20 +677,15 @@ fn decimal_string(value: &Value) -> eyre::Result<String> {
     }
 }
 
-fn format_decimal(value: f64) -> String {
-    let value = value.to_string();
-    if value.contains('.') || value.contains('e') || value.contains('E') {
-        value
-    } else {
-        format!("{value}.0")
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{collections::HashMap, sync::Arc};
 
-    use super::L4BookDeriver;
+    use super::{
+        L4BookDeriver,
+        snapshots::{StateSnapshot, StateSnapshotFetcher},
+        types::Snapshots
+    };
     use crate::{
         fs_handlers::types::FsOutData,
         hl_fs::{
@@ -732,8 +697,34 @@ mod tests {
     };
 
     #[test]
+    fn waits_for_snapshot_before_processing_batches() {
+        let mut deriver = deriver_without_snapshot();
+
+        let first = deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![status_row()]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+
+        assert!(first.is_none());
+        assert_eq!(deriver.pending_batch_count(), 1);
+
+        let second = deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![diff_row()]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap();
+
+        assert!(second.is_none());
+        assert_eq!(deriver.pending_batch_count(), 2);
+        assert_eq!(deriver.order_count(), 0);
+    }
+
+    #[test]
     fn waits_for_matching_status_and_diff_batches() {
-        let mut deriver = L4BookDeriver::new();
+        let mut deriver = deriver_with_snapshot(1019927124);
 
         let first = deriver
             .handle_data(&HyperliquidDirDataWithMeta {
@@ -763,6 +754,29 @@ mod tests {
         assert_eq!(update.order_statuses.len(), 1);
         assert_eq!(update.book_diffs.len(), 1);
         assert!(matches!(update.book_diffs[0].raw_book_diff, L4OrderDiff::New { .. }));
+    }
+
+    fn deriver_without_snapshot() -> L4BookDeriver {
+        L4BookDeriver {
+            order_status_cache: Default::default(),
+            book_diff_cache:    Default::default(),
+            order_books:        Default::default(),
+            state_snapshot:     StateSnapshotFetcher::empty(),
+            snapshot_height:    None
+        }
+    }
+
+    fn deriver_with_snapshot(height: u64) -> L4BookDeriver {
+        L4BookDeriver {
+            order_status_cache: Default::default(),
+            book_diff_cache:    Default::default(),
+            order_books:        Default::default(),
+            state_snapshot:     StateSnapshotFetcher::with_snapshot(StateSnapshot {
+                height,
+                snapshots: Snapshots::new(HashMap::new())
+            }),
+            snapshot_height:    None
+        }
     }
 
     fn status_row() -> NodeOrderStatusesRows {
