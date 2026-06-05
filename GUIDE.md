@@ -5,7 +5,7 @@ https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/sub
 to the local files available on a non-validating node under:
 
 ```text
-/var/lib/hyperliquid/hl/data
+/root/hl/data
 ```
 
 The official node docs usually show hourly paths such as
