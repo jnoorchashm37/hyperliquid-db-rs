@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::{
     processors::orderbook::types::{InnerL4Order, Px, Sz},
-    types::{L4Order, Side}
+    types::{L2BookLevel, L4Order, Side}
 };
 
 #[derive(Clone, Default)]
@@ -97,6 +97,20 @@ impl OrderBook {
                 .flat_map(|(_, level)| level.iter().cloned().map(Into::into))
                 .collect()
         ]
+    }
+
+    pub fn to_l2_snapshot(&self) -> [Vec<L2BookLevel>; 2] {
+        [
+            self.bids.iter().rev().map(Self::to_l2_level).collect(),
+            self.asks.iter().map(Self::to_l2_level).collect()
+        ]
+    }
+
+    fn to_l2_level((px, orders): (&Px, &VecDeque<InnerL4Order>)) -> L2BookLevel {
+        let sz = orders.iter().map(|order| order.sz().value()).sum();
+        let n = u64::try_from(orders.len()).unwrap_or(u64::MAX);
+
+        L2BookLevel { px: px.to_str(), sz: Sz::new(sz).to_str(), n }
     }
 
     fn match_order(&mut self, taker_order: &mut InnerL4Order) -> Vec<u64> {

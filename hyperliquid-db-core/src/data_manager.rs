@@ -54,7 +54,7 @@ impl HyperliquidDataManager {
             .iter()
             .map(HyperliquidDataKind::processor_kind)
             .unique()
-            .map(kind_to_processor)
+            .map(|kind| kind_to_processor(kind, data_kinds))
             .collect();
 
         tracing::debug!("spawned data manager");
@@ -111,10 +111,13 @@ impl HyperliquidDataManager {
 }
 
 fn kind_to_processor(
-    kind: HyperliquidDataProcessorKind
+    kind: HyperliquidDataProcessorKind,
+    data_kinds: &[HyperliquidDataKind]
 ) -> Box<dyn HyperliquidDataProcessorHandle> {
     match kind {
         HyperliquidDataProcessorKind::Trades => Box::new(TradeDeriver::new()),
-        HyperliquidDataProcessorKind::Orderbook => Box::new(OrderBookDeriver::new())
+        HyperliquidDataProcessorKind::Orderbook => {
+            Box::new(OrderBookDeriver::for_data_kinds(data_kinds))
+        }
     }
 }

@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     sync::Arc
 };
 
@@ -25,8 +25,8 @@ use crate::{
         }
     },
     types::{
-        HyperliquidData, HyperliquidDataWithMeta, L4Book, L4BookDiff, L4OrderDiff, L4OrderStatus,
-        ParsedDataPipelineMeta
+        HyperliquidData, HyperliquidDataKind, HyperliquidDataWithMeta, L2Book, L4Book, L4BookDiff,
+        L4OrderDiff, L4OrderStatus, ParsedDataPipelineMeta
     },
     utils::unix_timestamp
 };
@@ -44,12 +44,17 @@ pub struct OrderBookDeriver {
     snapshot_height:    Option<u64>,
     book_time:          u64,
     snapshots_pending:  bool,
-    ignore_spot:        bool
+    ignore_spot:        bool,
+    outputs:            OrderBookOutputs
 }
 
 impl OrderBookDeriver {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn for_data_kinds(data_kinds: &[HyperliquidDataKind]) -> Self {
+        Self { outputs: OrderBookOutputs::for_data_kinds(data_kinds), ..Default::default() }
     }
 
     pub fn with_ignore_spot(ignore_spot: bool) -> Self {
@@ -77,6 +82,19 @@ impl OrderBookDeriver {
                     time: self.book_time,
                     height,
                     levels: book.to_l4_snapshot()
+                })
+                .collect()
+        })
+    }
+
+    pub fn compute_l2_snapshots(&self) -> Option<Vec<L2Book>> {
+        self.snapshot_height.map(|_| {
+            self.order_books
+                .iter()
+                .map(|(coin, book)| L2Book {
+                    coin:   coin.clone(),
+                    time:   self.book_time,
+                    levels: book.to_l2_snapshot()
                 })
                 .collect()
         })
@@ -195,8 +213,8 @@ impl OrderBookDeriver {
     fn process_ready_batches(
         &mut self,
         processing_data_at_ns: u128
-    ) -> eyre::Result<Vec<HyperliquidDataWithMeta<L4Book>>> {
-        let mut out = Vec::new();
+    ) -> eyre::Result<ProcessedOrderBookData> {
+        let mut out = ProcessedOrderBookData::default();
 
         while let Some((order_statuses, book_diffs)) = self.pop_cache() {
             let applied = match self.apply_cached_batch(&order_statuses, &book_diffs) {
@@ -207,7 +225,7 @@ impl OrderBookDeriver {
                         "Failed to apply updates to this book. Waiting for next snapshot."
                     );
                     self.reset_after_apply_error();
-                    return Ok(Vec::new());
+                    return Ok(ProcessedOrderBookData::default());
                 }
             };
 
@@ -223,48 +241,103 @@ impl OrderBookDeriver {
             pipeline_meta.processing_data_at_ns = processing_data_at_ns;
             pipeline_meta.processed_data_at_ns = unix_timestamp().as_nanos();
 
-            for update in coin_to_book_updates(
-                order_statuses.events,
-                book_diffs.events,
-                book_diffs.time,
-                book_diffs.block_number
-            ) {
-                out.push(HyperliquidDataWithMeta {
-                    data:          L4Book::Updates(update),
-                    pipeline_meta: pipeline_meta.clone()
-                });
+            if self.outputs.l2 {
+                out.l2.extend(self.l2_updates_for_book_diffs(
+                    &book_diffs.events,
+                    book_diffs.time,
+                    pipeline_meta.clone()
+                ));
+            }
+
+            if self.outputs.l4 {
+                for update in coin_to_book_updates(
+                    order_statuses.events,
+                    book_diffs.events,
+                    book_diffs.time,
+                    book_diffs.block_number
+                ) {
+                    out.l4.push(HyperliquidDataWithMeta {
+                        data:          L4Book::Updates(update),
+                        pipeline_meta: pipeline_meta.clone()
+                    });
+                }
             }
         }
 
         Ok(out)
     }
 
+    fn l2_updates_for_book_diffs(
+        &self,
+        book_diffs: &[L4BookDiff],
+        time: u64,
+        pipeline_meta: ParsedDataPipelineMeta
+    ) -> Vec<HyperliquidDataWithMeta<L2Book>> {
+        let mut coins = BTreeSet::new();
+        for diff in book_diffs {
+            if self.ignore_spot && Coin::new(&diff.coin).is_spot() {
+                continue;
+            }
+            coins.insert(diff.coin.clone());
+        }
+
+        coins
+            .into_iter()
+            .filter_map(|coin| {
+                self.order_books
+                    .get(&coin)
+                    .map(|book| HyperliquidDataWithMeta {
+                        data:          L2Book { coin, levels: book.to_l2_snapshot(), time },
+                        pipeline_meta: pipeline_meta.clone()
+                    })
+            })
+            .collect()
+    }
+
     fn process_pending_snapshots(
         &mut self,
         fs_data: &Arc<FsOutData>,
         processing_data_at_ns: u128
-    ) -> Vec<HyperliquidDataWithMeta<L4Book>> {
+    ) -> ProcessedOrderBookData {
         if !self.snapshots_pending {
-            return Vec::new();
+            return ProcessedOrderBookData::default();
         }
         self.snapshots_pending = false;
-
-        let Some(snapshots) = self.compute_snapshots() else {
-            return Vec::new();
-        };
 
         let mut pipeline_meta = ParsedDataPipelineMeta::default();
         pipeline_meta.modify_with_fs_data(fs_data);
         pipeline_meta.processing_data_at_ns = processing_data_at_ns;
         pipeline_meta.processed_data_at_ns = unix_timestamp().as_nanos();
 
-        snapshots
-            .into_iter()
-            .map(|snapshot| HyperliquidDataWithMeta {
-                data:          snapshot,
-                pipeline_meta: pipeline_meta.clone()
-            })
-            .collect()
+        let mut out = ProcessedOrderBookData::default();
+
+        if self.outputs.l4 {
+            if let Some(snapshots) = self.compute_snapshots() {
+                out.l4.extend(
+                    snapshots
+                        .into_iter()
+                        .map(|snapshot| HyperliquidDataWithMeta {
+                            data:          snapshot,
+                            pipeline_meta: pipeline_meta.clone()
+                        })
+                );
+            }
+        }
+
+        if self.outputs.l2 {
+            if let Some(snapshots) = self.compute_l2_snapshots() {
+                out.l2.extend(
+                    snapshots
+                        .into_iter()
+                        .map(|snapshot| HyperliquidDataWithMeta {
+                            data:          snapshot,
+                            pipeline_meta: pipeline_meta.clone()
+                        })
+                );
+            }
+        }
+
+        out
     }
 
     fn apply_cached_batches(&mut self) -> eyre::Result<()> {
@@ -395,7 +468,37 @@ impl HyperliquidDataProcessorHandle for OrderBookDeriver {
             return Ok(Vec::new());
         }
 
-        if out.is_empty() { Ok(Vec::new()) } else { Ok(vec![HyperliquidData::L4Book(out)]) }
+        if out.is_empty() { Ok(Vec::new()) } else { Ok(out.into_hyperliquid_data()) }
+    }
+}
+
+#[derive(Default)]
+struct ProcessedOrderBookData {
+    l4: Vec<HyperliquidDataWithMeta<L4Book>>,
+    l2: Vec<HyperliquidDataWithMeta<L2Book>>
+}
+
+impl ProcessedOrderBookData {
+    fn extend(&mut self, other: Self) {
+        self.l4.extend(other.l4);
+        self.l2.extend(other.l2);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.l4.is_empty() && self.l2.is_empty()
+    }
+
+    fn into_hyperliquid_data(self) -> Vec<HyperliquidData> {
+        let mut out = Vec::new();
+
+        if !self.l4.is_empty() {
+            out.push(HyperliquidData::L4Book(self.l4));
+        }
+        if !self.l2.is_empty() {
+            out.push(HyperliquidData::L2Book(self.l2));
+        }
+
+        out
     }
 }
 
@@ -454,6 +557,27 @@ impl<T> BatchQueue<T> {
     }
 }
 
+#[derive(Clone, Copy)]
+struct OrderBookOutputs {
+    l4: bool,
+    l2: bool
+}
+
+impl Default for OrderBookOutputs {
+    fn default() -> Self {
+        Self { l4: true, l2: false }
+    }
+}
+
+impl OrderBookOutputs {
+    fn for_data_kinds(data_kinds: &[HyperliquidDataKind]) -> Self {
+        Self {
+            l4: data_kinds.contains(&HyperliquidDataKind::L4Book),
+            l2: data_kinds.contains(&HyperliquidDataKind::L2Book)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, sync::Arc};
@@ -470,7 +594,7 @@ mod tests {
             schemas::{NodeOrderStatusesRows, NodeRawBookDiffsRows}
         },
         processors::HyperliquidDataProcessorHandle,
-        types::{HyperliquidData, L4Book, L4OrderDiff, Side}
+        types::{HyperliquidData, HyperliquidDataKind, L4Book, L4OrderDiff, Side}
     };
 
     #[test]
@@ -577,6 +701,119 @@ mod tests {
     }
 
     #[test]
+    fn emits_l2_updates_after_matched_batch() {
+        let mut deriver = deriver_with_snapshot(1019927124);
+        request_all_orderbook_outputs(&mut deriver);
+
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![status_row()]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+
+        let out = deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![diff_row()]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap();
+
+        assert_eq!(out.len(), 2);
+
+        let HyperliquidData::L2Book(books) = &out[1] else { unreachable!() };
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].data.coin, "JTO");
+        assert_eq!(books[0].data.time, 1780394399398);
+        assert!(books[0].data.bids().is_empty());
+
+        let asks = books[0].data.asks();
+        assert_eq!(asks.len(), 1);
+        assert_eq!(asks[0].px, "0.65313");
+        assert_eq!(asks[0].sz, "1096");
+        assert_eq!(asks[0].n, 1);
+    }
+
+    #[test]
+    fn emits_l2_snapshots_after_initializing_from_state() {
+        let mut snapshots = HashMap::new();
+        snapshots.insert(
+            Coin::new("BTC"),
+            Snapshot::new([
+                vec![
+                    inner_order(1, Side::Bid, 100.0, 1.25),
+                    inner_order(2, Side::Bid, 100.0, 0.75),
+                ],
+                vec![inner_order(3, Side::Ask, 101.0, 2.0)]
+            ])
+        );
+        let mut deriver = deriver_with_state_snapshot(1019927124, Snapshots::new(snapshots));
+        request_all_orderbook_outputs(&mut deriver);
+
+        let out = deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+
+        assert_eq!(out.len(), 2);
+
+        let HyperliquidData::L2Book(books) = &out[1] else { unreachable!() };
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].data.coin, "BTC");
+        assert_eq!(books[0].data.time, 0);
+
+        let bids = books[0].data.bids();
+        assert_eq!(bids.len(), 1);
+        assert_eq!(bids[0].px, "100");
+        assert_eq!(bids[0].sz, "2");
+        assert_eq!(bids[0].n, 2);
+
+        let asks = books[0].data.asks();
+        assert_eq!(asks.len(), 1);
+        assert_eq!(asks[0].px, "101");
+        assert_eq!(asks[0].sz, "2");
+        assert_eq!(asks[0].n, 1);
+    }
+
+    #[test]
+    fn only_emits_requested_orderbook_outputs() {
+        let mut snapshots = HashMap::new();
+        snapshots.insert(
+            Coin::new("BTC"),
+            Snapshot::new([vec![inner_order(1, Side::Bid, 100.0, 1.25)], vec![]])
+        );
+
+        let mut deriver = OrderBookDeriver::for_data_kinds(&[HyperliquidDataKind::L2Book]);
+        deriver.state_snapshot = StateSnapshotFetcher::with_snapshot(StateSnapshot {
+            height:    1019927124,
+            snapshots: Snapshots::new(snapshots)
+        });
+
+        let out = deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0], HyperliquidData::L2Book(_)));
+    }
+
+    fn request_all_orderbook_outputs(deriver: &mut OrderBookDeriver) {
+        deriver.outputs = super::OrderBookOutputs::for_data_kinds(&[
+            HyperliquidDataKind::L4Book,
+            HyperliquidDataKind::L2Book
+        ]);
+    }
+
+    #[test]
     fn resets_ready_book_after_apply_failure() {
         let mut deriver = ready_deriver(1019927124);
 
@@ -614,7 +851,8 @@ mod tests {
             snapshot_height:    None,
             book_time:          0,
             snapshots_pending:  false,
-            ignore_spot:        false
+            ignore_spot:        false,
+            outputs:            Default::default()
         }
     }
 
@@ -637,7 +875,8 @@ mod tests {
             snapshot_height:    None,
             book_time:          0,
             snapshots_pending:  false,
-            ignore_spot:        false
+            ignore_spot:        false,
+            outputs:            Default::default()
         }
     }
 
@@ -650,7 +889,8 @@ mod tests {
             snapshot_height:    Some(height),
             book_time:          0,
             snapshots_pending:  false,
-            ignore_spot:        false
+            ignore_spot:        false,
+            outputs:            Default::default()
         }
     }
 

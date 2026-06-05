@@ -10,7 +10,7 @@ pub use common::*;
 use serde::{Deserialize, Serialize};
 pub use trades::{PendingTrade, Trade};
 mod l2_book;
-pub use l2_book::L2Book;
+pub use l2_book::{L2Book, L2BookLevel};
 use strum::IntoEnumIterator;
 
 use crate::{
