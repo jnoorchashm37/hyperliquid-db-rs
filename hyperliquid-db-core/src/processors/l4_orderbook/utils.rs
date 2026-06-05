@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::types::{L4BookDiff, L4BookUpdates, L4Order, L4OrderStatus};
+use crate::types::{L4BookDiff, L4BookUpdates, L4OrderStatus};
 
 pub fn coin_to_book_updates(
     order_statuses: Vec<L4OrderStatus>,
@@ -27,14 +27,4 @@ pub fn coin_to_book_updates(
     }
 
     updates.into_values().collect()
-}
-
-pub fn convert_trigger(order: &mut L4Order, status_time: u64) {
-    if order.is_trigger {
-        order.trigger_px = 0.0;
-        order.trigger_condition = "Triggered".to_string();
-        order.is_trigger = false;
-        order.timestamp = status_time;
-        order.tif = Some("Gtc".to_string());
-    }
 }

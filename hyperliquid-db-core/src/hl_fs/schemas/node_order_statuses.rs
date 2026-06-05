@@ -340,7 +340,7 @@ mod tests {
             events:       Vec::new()
         };
 
-        assert_eq!(row.local_time_unix_ms().unwrap(), 1_780_617_600);
-        assert_eq!(row.block_time_unix_ms().unwrap(), 1_780_617_601);
+        assert_eq!(row.local_time_unix_ms().unwrap(), 1_780_617_600_003);
+        assert_eq!(row.block_time_unix_ms().unwrap(), 1_780_617_601_999);
     }
 }

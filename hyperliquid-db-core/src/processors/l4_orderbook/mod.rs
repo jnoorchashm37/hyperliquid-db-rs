@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     sync::Arc
 };
 
@@ -20,7 +20,8 @@ use crate::{
         HyperliquidDataProcessorHandle,
         l4_orderbook::{
             book::OrderBook,
-            utils::{coin_to_book_updates, convert_trigger}
+            types::{Coin, InnerL4Order, Sz},
+            utils::coin_to_book_updates
         }
     },
     types::{
@@ -38,14 +39,21 @@ const FETCH_SNAPSHOT_SLEEP_TIME_SEC: u64 = 5;
 pub struct L4BookDeriver {
     order_status_cache: BatchQueue<L4OrderStatus>,
     book_diff_cache:    BatchQueue<L4BookDiff>,
-    order_books:        HashMap<String, OrderBook>,
+    order_books:        BTreeMap<String, OrderBook>,
     state_snapshot:     StateSnapshotFetcher,
-    snapshot_height:    Option<u64>
+    snapshot_height:    Option<u64>,
+    book_time:          u64,
+    snapshots_pending:  bool,
+    ignore_spot:        bool
 }
 
 impl L4BookDeriver {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_ignore_spot(ignore_spot: bool) -> Self {
+        Self { ignore_spot, ..Default::default() }
     }
 
     pub fn order_count(&self) -> usize {
@@ -56,8 +64,22 @@ impl L4BookDeriver {
         self.order_status_cache.len() + self.book_diff_cache.len()
     }
 
-    fn is_ready(&self) -> bool {
+    pub fn is_ready(&self) -> bool {
         self.snapshot_height.is_some()
+    }
+
+    pub fn compute_snapshots(&self) -> Option<Vec<L4Book>> {
+        self.snapshot_height.map(|height| {
+            self.order_books
+                .iter()
+                .map(|(coin, book)| L4Book::Snapshot {
+                    coin: coin.clone(),
+                    time: self.book_time,
+                    height,
+                    levels: book.to_l4_snapshot()
+                })
+                .collect()
+        })
     }
 
     fn try_initialize_from_snapshot(&mut self) -> eyre::Result<bool> {
@@ -70,8 +92,9 @@ impl L4BookDeriver {
             return Ok(false);
         };
 
-        self.order_books = snapshots.as_orderbooks()?;
+        self.order_books = snapshots.as_orderbooks(self.ignore_spot)?;
         self.snapshot_height = Some(height);
+        self.book_time = 0;
 
         if let Err(error) = self.apply_cached_batches() {
             tracing::info!(
@@ -79,12 +102,11 @@ impl L4BookDeriver {
                 "Failed to apply updates to this book (likely missing older updates). Waiting for \
                  next snapshot."
             );
-            self.order_books.clear();
-            self.snapshot_height = None;
-            self.state_snapshot.fetch_new();
+            self.reset_after_apply_error();
             return Ok(false);
         }
 
+        self.snapshots_pending = true;
         tracing::info!(
             snapshot_height = height,
             current_height = self.snapshot_height.unwrap_or(height),
@@ -92,6 +114,14 @@ impl L4BookDeriver {
             "l4 order book ready"
         );
         Ok(true)
+    }
+
+    fn reset_after_apply_error(&mut self) {
+        self.order_books.clear();
+        self.snapshot_height = None;
+        self.book_time = 0;
+        self.snapshots_pending = false;
+        self.state_snapshot.fetch_new();
     }
 
     fn receive_order_statuses(
@@ -169,7 +199,19 @@ impl L4BookDeriver {
         let mut out = Vec::new();
 
         while let Some((order_statuses, book_diffs)) = self.pop_cache() {
-            if !self.apply_cached_batch(&order_statuses, &book_diffs)? {
+            let applied = match self.apply_cached_batch(&order_statuses, &book_diffs) {
+                Ok(applied) => applied,
+                Err(error) => {
+                    tracing::info!(
+                        ?error,
+                        "Failed to apply updates to this book. Waiting for next snapshot."
+                    );
+                    self.reset_after_apply_error();
+                    return Ok(Vec::new());
+                }
+            };
+
+            if !applied {
                 continue;
             }
 
@@ -195,6 +237,34 @@ impl L4BookDeriver {
         }
 
         Ok(out)
+    }
+
+    fn process_pending_snapshots(
+        &mut self,
+        fs_data: &Arc<FsOutData>,
+        processing_data_at_ns: u128
+    ) -> Vec<HyperliquidDataWithMeta<L4Book>> {
+        if !self.snapshots_pending {
+            return Vec::new();
+        }
+        self.snapshots_pending = false;
+
+        let Some(snapshots) = self.compute_snapshots() else {
+            return Vec::new();
+        };
+
+        let mut pipeline_meta = ParsedDataPipelineMeta::default();
+        pipeline_meta.modify_with_fs_data(fs_data);
+        pipeline_meta.processing_data_at_ns = processing_data_at_ns;
+        pipeline_meta.processed_data_at_ns = unix_timestamp().as_nanos();
+
+        snapshots
+            .into_iter()
+            .map(|snapshot| HyperliquidDataWithMeta {
+                data:          snapshot,
+                pipeline_meta: pipeline_meta.clone()
+            })
+            .collect()
     }
 
     fn apply_cached_batches(&mut self) -> eyre::Result<()> {
@@ -235,6 +305,7 @@ impl L4BookDeriver {
 
         self.apply_updates(&order_statuses.events, &book_diffs.events)?;
         self.snapshot_height = Some(order_statuses.block_number);
+        self.book_time = order_statuses.time;
 
         Ok(true)
     }
@@ -251,17 +322,23 @@ impl L4BookDeriver {
             .collect::<HashMap<_, _>>();
 
         for diff in book_diffs {
+            if self.ignore_spot && Coin::new(&diff.coin).is_spot() {
+                continue;
+            }
+
             match &diff.raw_book_diff {
                 L4OrderDiff::New { sz } => {
                     let Some(order_status) = order_map.remove(&diff.oid) else {
                         return Err(eyre::eyre!("unable to find order opening status: {diff:?}"));
                     };
-                    let mut order = order_status.order.clone();
-                    order.user = Some(order_status.user.clone());
-                    order.sz = sz.clone();
-                    convert_trigger(&mut order, order_status.time_unix_ms()?);
+                    let mut order = InnerL4Order::try_from((
+                        order_status.user.clone(),
+                        order_status.order.clone()
+                    ))?;
+                    order.modify_sz(Sz::new_f64(*sz));
+                    order.convert_trigger(order_status.time_unix_ms()?);
                     self.order_books
-                        .entry(order.coin.clone())
+                        .entry(order.coin.value())
                         .or_default()
                         .add_order(order)?;
                 }
@@ -269,7 +346,7 @@ impl L4BookDeriver {
                     if !self
                         .order_books
                         .get_mut(&diff.coin)
-                        .is_some_and(|book| book.modify_sz(diff.oid, new_sz.clone()))
+                        .is_some_and(|book| book.modify_sz(diff.oid, Sz::new_f64(*new_sz)))
                     {
                         return Err(eyre::eyre!("unable to find order on the book: {diff:?}"));
                     }
@@ -311,8 +388,14 @@ impl HyperliquidDataProcessorHandle for L4BookDeriver {
             return Ok(None);
         }
 
-        let updates = self.process_ready_batches(processing_data_at_ns)?;
-        if updates.is_empty() { Ok(None) } else { Ok(Some(HyperliquidData::L4Book(updates))) }
+        let mut out = self.process_pending_snapshots(&data.pipeline_meta, processing_data_at_ns);
+        out.extend(self.process_ready_batches(processing_data_at_ns)?);
+
+        if !self.is_ready() {
+            return Ok(None);
+        }
+
+        if out.is_empty() { Ok(None) } else { Ok(Some(HyperliquidData::L4Book(out))) }
     }
 }
 
@@ -378,7 +461,7 @@ mod tests {
     use super::{
         L4BookDeriver,
         snapshots::{StateSnapshot, StateSnapshotFetcher},
-        types::Snapshots
+        types::{Coin, InnerL4Order, Px, Snapshot, Snapshots, Sz}
     };
     use crate::{
         fs_handlers::types::FsOutData,
@@ -387,7 +470,7 @@ mod tests {
             schemas::{NodeOrderStatusesRows, NodeRawBookDiffsRows}
         },
         processors::HyperliquidDataProcessorHandle,
-        types::{HyperliquidData, L4Book, L4OrderDiff}
+        types::{HyperliquidData, L4Book, L4OrderDiff, Side}
     };
 
     #[test]
@@ -450,26 +533,112 @@ mod tests {
         assert!(matches!(update.book_diffs[0].raw_book_diff, L4OrderDiff::New { .. }));
     }
 
+    #[test]
+    fn emits_l4_snapshots_after_initializing_from_state() {
+        let mut snapshots = HashMap::new();
+        snapshots.insert(
+            Coin::new("BTC"),
+            Snapshot::new([vec![inner_order(1, Side::Bid, 100.0, 1.25)], vec![]])
+        );
+        let mut deriver = deriver_with_state_snapshot(1019927124, Snapshots::new(snapshots));
+
+        let out = deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap()
+            .expect("initialization should emit l4 snapshots");
+
+        let HyperliquidData::L4Book(books) = out else { unreachable!() };
+        assert_eq!(books.len(), 1);
+
+        let L4Book::Snapshot { coin, time, height, levels } = &books[0].data else {
+            unreachable!()
+        };
+        assert_eq!(coin, "BTC");
+        assert_eq!(*time, 0);
+        assert_eq!(*height, 1019927124);
+        assert_eq!(levels[0].len(), 1);
+        assert_eq!(levels[0][0].oid, 1);
+        assert_eq!(levels[0][0].sz, 1.25);
+    }
+
+    #[test]
+    fn resets_ready_book_after_apply_failure() {
+        let mut deriver = ready_deriver(1019927124);
+
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+
+        let out = deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![remove_diff_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap();
+
+        assert!(out.is_none());
+        assert!(!deriver.is_ready());
+        assert_eq!(deriver.order_count(), 0);
+    }
+
     fn deriver_without_snapshot() -> L4BookDeriver {
         L4BookDeriver {
             order_status_cache: Default::default(),
             book_diff_cache:    Default::default(),
             order_books:        Default::default(),
             state_snapshot:     StateSnapshotFetcher::empty(),
-            snapshot_height:    None
+            snapshot_height:    None,
+            book_time:          0,
+            snapshots_pending:  false,
+            ignore_spot:        false
         }
     }
 
     fn deriver_with_snapshot(height: u64) -> L4BookDeriver {
+        deriver_with_state_snapshot(height, Snapshots::new(HashMap::new()))
+    }
+
+    fn deriver_with_state_snapshot(
+        height: u64,
+        snapshots: Snapshots<InnerL4Order>
+    ) -> L4BookDeriver {
         L4BookDeriver {
             order_status_cache: Default::default(),
             book_diff_cache:    Default::default(),
             order_books:        Default::default(),
             state_snapshot:     StateSnapshotFetcher::with_snapshot(StateSnapshot {
                 height,
-                snapshots: Snapshots::new(HashMap::new())
+                snapshots
             }),
-            snapshot_height:    None
+            snapshot_height:    None,
+            book_time:          0,
+            snapshots_pending:  false,
+            ignore_spot:        false
+        }
+    }
+
+    fn ready_deriver(height: u64) -> L4BookDeriver {
+        L4BookDeriver {
+            order_status_cache: Default::default(),
+            book_diff_cache:    Default::default(),
+            order_books:        Default::default(),
+            state_snapshot:     StateSnapshotFetcher::empty(),
+            snapshot_height:    Some(height),
+            book_time:          0,
+            snapshots_pending:  false,
+            ignore_spot:        false
         }
     }
 
@@ -526,6 +695,57 @@ mod tests {
             }"#
         )
         .unwrap()
+    }
+
+    fn empty_status_row(block_number: u64) -> NodeOrderStatusesRows {
+        serde_json::from_str(&format!(
+            r#"{{
+                "local_time":"2026-06-02T10:00:00.854461191",
+                "block_time":"2026-06-02T09:59:59.398971110",
+                "block_number":{block_number},
+                "events":[]
+            }}"#
+        ))
+        .unwrap()
+    }
+
+    fn remove_diff_row(block_number: u64) -> NodeRawBookDiffsRows {
+        serde_json::from_str(&format!(
+            r#"{{
+                "local_time":"2026-06-02T10:00:00.854322306",
+                "block_time":"2026-06-02T09:59:59.398971110",
+                "block_number":{block_number},
+                "events":[{{
+                    "user":"0x31ca8395cf837de08b24da3f660e77761dfb974b",
+                    "oid":999,
+                    "coin":"JTO",
+                    "side":"A",
+                    "px":"0.65313",
+                    "raw_book_diff":"remove"
+                }}]
+            }}"#
+        ))
+        .unwrap()
+    }
+
+    fn inner_order(oid: u64, side: Side, limit_px: f64, sz: f64) -> InnerL4Order {
+        InnerL4Order {
+            user: "0x0000000000000000000000000000000000000000".to_string(),
+            coin: Coin::new("BTC"),
+            side,
+            limit_px: Px::new_f64(limit_px),
+            sz: Sz::new_f64(sz),
+            oid,
+            timestamp: 0,
+            trigger_condition: "N/A".to_string(),
+            is_trigger: false,
+            trigger_px: 0.0,
+            is_position_tpsl: false,
+            reduce_only: false,
+            order_type: "Limit".to_string(),
+            tif: Some("Gtc".to_string()),
+            cloid: None
+        }
     }
 
     fn fs_data(kind: HyperliquidDirKind) -> Arc<FsOutData> {

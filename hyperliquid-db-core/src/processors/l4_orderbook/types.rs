@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::{self, Formatter}
 };
 
@@ -21,13 +21,18 @@ impl<O> Snapshots<O> {
 }
 
 impl Snapshots<InnerL4Order> {
-    pub fn as_orderbooks(self) -> eyre::Result<HashMap<String, OrderBook>> {
-        let mut order_books = HashMap::new();
+    pub fn as_orderbooks(self, ignore_spot: bool) -> eyre::Result<BTreeMap<String, OrderBook>> {
+        let mut order_books = BTreeMap::new();
 
-        for (coin, snapshot) in self.value() {
+        for (coin, mut snapshot) in self.value() {
+            if ignore_spot && coin.is_spot() {
+                continue;
+            }
+
+            snapshot.remove_triggers();
             let mut order_book = OrderBook::default();
             for order in snapshot.into_levels().into_iter().flatten() {
-                order_book.add_order(order.into())?;
+                order_book.add_order(order)?;
             }
             order_books.insert(coin.value(), order_book);
         }
@@ -46,6 +51,29 @@ impl<O> Snapshot<O> {
 
     pub fn into_levels(self) -> [Vec<O>; 2] {
         self.0
+    }
+}
+
+impl Snapshot<InnerL4Order> {
+    fn remove_triggers(&mut self) {
+        let bid_oids = self.0[0]
+            .iter()
+            .map(|order| order.oid)
+            .collect::<HashSet<_>>();
+        let ask_oids = self.0[1]
+            .iter()
+            .map(|order| order.oid)
+            .collect::<HashSet<_>>();
+
+        for orders in &mut self.0 {
+            while let Some(order) = orders.last() {
+                if bid_oids.contains(&order.oid) && ask_oids.contains(&order.oid) {
+                    orders.pop();
+                } else {
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -304,5 +332,62 @@ impl fmt::Debug for Px {
 impl fmt::Debug for Sz {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", (self.value() as f64 / PRICE_MULTIPLIER))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_loader_filters_trailing_trigger_placeholders() {
+        let mut snapshots = HashMap::new();
+        snapshots.insert(
+            Coin::new("BTC"),
+            Snapshot::new([
+                vec![order(1, Side::Bid, 1.0), trigger_placeholder(2, Side::Bid)],
+                vec![order(3, Side::Ask, 2.0), trigger_placeholder(2, Side::Ask)]
+            ])
+        );
+
+        let order_books = Snapshots::new(snapshots).as_orderbooks(false).unwrap();
+
+        assert_eq!(order_books.get("BTC").unwrap().order_count(), 2);
+    }
+
+    #[test]
+    fn snapshot_loader_can_ignore_spot_books() {
+        let mut snapshots = HashMap::new();
+        snapshots.insert(Coin::new("@1"), Snapshot::new([vec![order(1, Side::Bid, 1.0)], vec![]]));
+
+        let order_books = Snapshots::new(snapshots).as_orderbooks(true).unwrap();
+
+        assert!(order_books.is_empty());
+    }
+
+    fn trigger_placeholder(oid: u64, side: Side) -> InnerL4Order {
+        let mut order = order(oid, side, if side == Side::Bid { 0.5 } else { 2.5 });
+        order.is_trigger = true;
+        order
+    }
+
+    fn order(oid: u64, side: Side, limit_px: f64) -> InnerL4Order {
+        InnerL4Order {
+            user: "0x0000000000000000000000000000000000000000".to_string(),
+            coin: Coin::new("BTC"),
+            side,
+            limit_px: Px::new_f64(limit_px),
+            sz: Sz::new_f64(1.0),
+            oid,
+            timestamp: 0,
+            trigger_condition: "N/A".to_string(),
+            is_trigger: false,
+            trigger_px: 0.0,
+            is_position_tpsl: false,
+            reduce_only: false,
+            order_type: "Limit".to_string(),
+            tif: Some("Gtc".to_string()),
+            cloid: None
+        }
     }
 }

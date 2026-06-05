@@ -17,11 +17,14 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct StateSnapshotFetcher(Arc<Mutex<Option<StateSnapshot>>>);
+pub struct StateSnapshotFetcher {
+    snapshot:   Arc<Mutex<Option<StateSnapshot>>>,
+    auto_fetch: bool
+}
 
 impl StateSnapshotFetcher {
     pub fn new() -> Self {
-        let this = Self(Arc::new(Mutex::new(None)));
+        let this = Self { snapshot: Arc::new(Mutex::new(None)), auto_fetch: true };
         this.fetch_new();
 
         this
@@ -29,24 +32,24 @@ impl StateSnapshotFetcher {
 
     #[cfg(test)]
     pub fn empty() -> Self {
-        Self(Arc::new(Mutex::new(None)))
+        Self { snapshot: Arc::new(Mutex::new(None)), auto_fetch: false }
     }
 
     #[cfg(test)]
     pub fn with_snapshot(snapshot: StateSnapshot) -> Self {
-        Self(Arc::new(Mutex::new(Some(snapshot))))
+        Self { snapshot: Arc::new(Mutex::new(Some(snapshot))), auto_fetch: false }
     }
 
     #[allow(unused)]
     pub fn read<T>(&self, f: impl FnOnce(&Option<StateSnapshot>) -> T) -> eyre::Result<T> {
-        let lock = self.0.try_lock().map_err(|e| eyre::eyre!("{e:?}"))?;
+        let lock = self.snapshot.try_lock().map_err(|e| eyre::eyre!("{e:?}"))?;
         let val = f(&lock);
         drop(lock);
         Ok(val)
     }
 
     pub fn write<T>(&self, f: impl FnOnce(&mut Option<StateSnapshot>) -> T) -> eyre::Result<T> {
-        let mut lock = self.0.try_lock().map_err(|e| eyre::eyre!("{e:?}"))?;
+        let mut lock = self.snapshot.try_lock().map_err(|e| eyre::eyre!("{e:?}"))?;
         let val = f(&mut lock);
         drop(lock);
         Ok(val)
@@ -58,6 +61,10 @@ impl StateSnapshotFetcher {
     }
 
     pub fn fetch_new(&self) {
+        if !self.auto_fetch {
+            return;
+        }
+
         let this = self.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs(FETCH_SNAPSHOT_SLEEP_TIME_SEC));
