@@ -5,6 +5,8 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
+mod l2_book;
+#[cfg(target_os = "linux")]
 mod trades;
 #[cfg(target_os = "linux")]
 mod utils;
@@ -12,6 +14,11 @@ mod utils;
 #[cfg(target_os = "linux")]
 fn main() {
     if let Err(err) = trades::run_trades_ws_bench() {
+        eprintln!("{err:?}");
+        std::process::exit(1);
+    }
+
+    if let Err(err) = l2_book::run_l2_book_ws_bench() {
         eprintln!("{err:?}");
         std::process::exit(1);
     }

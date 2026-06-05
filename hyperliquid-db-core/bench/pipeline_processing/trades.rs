@@ -7,7 +7,10 @@ use std::{
 };
 
 use hyperliquid_db_core::{
-    types::{HyperliquidData, HyperliquidDataWithMeta, ParsedDataPipelineMeta, Trade},
+    types::{
+        HyperliquidData, HyperliquidDataKind, HyperliquidDataWithMeta, ParsedDataPipelineMeta,
+        Trade
+    },
     utils::{NS_PER_MS, unix_timestamp}
 };
 use serde::Deserialize;
@@ -91,7 +94,7 @@ fn run_public_ws_stream() -> JoinHandle<eyre::Result<TradeCache>> {
 
 fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
     std::thread::spawn(move || {
-        let mut implemented_stream = spawn_hl_watcher()?;
+        let mut implemented_stream = spawn_hl_watcher(HyperliquidDataKind::Trades)?;
         let mut cache = TradeCache::new("pipeline");
 
         loop {

@@ -42,8 +42,10 @@ pub fn set_hl_websocket_read_timeout(
     }
 }
 
-pub fn spawn_hl_watcher() -> eyre::Result<broadcast::Receiver<Arc<eyre::Result<HyperliquidData>>>> {
-    let data_rx = HyperliquidDataManager::spawn(&[HyperliquidDataKind::Trades])?;
+pub fn spawn_hl_watcher(
+    kind: HyperliquidDataKind
+) -> eyre::Result<broadcast::Receiver<Arc<eyre::Result<HyperliquidData>>>> {
+    let data_rx = HyperliquidDataManager::spawn(&[kind])?;
 
     Ok(data_rx.subscribe())
 }
