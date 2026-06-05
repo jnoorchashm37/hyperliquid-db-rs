@@ -1,5 +1,6 @@
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
+use serde_with::{DisplayFromStr, serde_as};
 
 use crate::{
     hl_fs::schemas::{
@@ -111,18 +112,22 @@ impl TryFrom<NodeRawBookDiffsEvent> for L4BookDiff {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct L4Order {
     pub user:              Option<String>,
     pub coin:              String,
     pub side:              Side,
+    #[serde_as(as = "DisplayFromStr")]
     pub limit_px:          f64,
+    #[serde_as(as = "DisplayFromStr")]
     pub sz:                f64,
     pub oid:               u64,
     pub timestamp:         u64,
     pub trigger_condition: String,
     pub is_trigger:        bool,
+    #[serde_as(as = "DisplayFromStr")]
     pub trigger_px:        f64,
     pub is_position_tpsl:  bool,
     pub reduce_only:       bool,

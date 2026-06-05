@@ -156,3 +156,85 @@ pub struct StateSnapshot {
     pub height:    u64,
     pub snapshots: Snapshots<InnerL4Order>
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn loads_snapshot_orders_with_string_or_number_decimals() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snapshot.json");
+        let payload = json!([
+            101,
+            [
+                [
+                    "BTC",
+                    [
+                        [
+                            [
+                                "0xuser",
+                                {
+                                    "coin": "BTC",
+                                    "side": "B",
+                                    "limitPx": "0.60045",
+                                    "sz": "1.25",
+                                    "oid": 1,
+                                    "timestamp": 123,
+                                    "triggerCondition": "N/A",
+                                    "isTrigger": false,
+                                    "triggerPx": "0.0",
+                                    "isPositionTpsl": false,
+                                    "reduceOnly": false,
+                                    "orderType": "Limit",
+                                    "tif": "Gtc",
+                                    "cloid": null
+                                }
+                            ]
+                        ],
+                        [
+                            [
+                                "0xuser",
+                                {
+                                    "coin": "BTC",
+                                    "side": "A",
+                                    "limitPx": 0.70045,
+                                    "sz": 2.5,
+                                    "oid": 2,
+                                    "timestamp": 124,
+                                    "triggerCondition": "N/A",
+                                    "isTrigger": false,
+                                    "triggerPx": 0.0,
+                                    "isPositionTpsl": false,
+                                    "reduceOnly": false,
+                                    "orderType": "Limit",
+                                    "tif": "Gtc",
+                                    "cloid": null
+                                }
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]);
+        std::fs::write(&path, payload.to_string()).unwrap();
+
+        let (height, snapshots) = StateSnapshotFetcher::load_snapshots_from_file::<
+            InnerL4Order,
+            (String, L4Order)
+        >(&path)
+        .unwrap();
+
+        let mut snapshots = snapshots.value();
+        let snapshot = snapshots.remove(&Coin::new("BTC")).unwrap();
+        let [bids, asks] = snapshot.into_levels();
+
+        assert_eq!(height, 101);
+        assert!((bids[0].limit_px.to_f64() - 0.60045).abs() < f64::EPSILON);
+        assert!((bids[0].sz.to_f64() - 1.25).abs() < f64::EPSILON);
+        assert!((asks[0].limit_px.to_f64() - 0.70045).abs() < f64::EPSILON);
+        assert!((asks[0].sz.to_f64() - 2.5).abs() < f64::EPSILON);
+    }
+}

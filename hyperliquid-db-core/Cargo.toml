@@ -10,6 +10,7 @@ exclude.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_with.workspace = true
 eyre.workspace = true
 notify.workspace = true
 tracing.workspace = true
