@@ -92,7 +92,7 @@ impl L4BookDeriver {
             return Ok(false);
         };
 
-        self.order_books = snapshots.as_orderbooks(self.ignore_spot)?;
+        self.order_books = snapshots.into_orderbooks(self.ignore_spot)?;
         self.snapshot_height = Some(height);
         self.book_time = 0;
 

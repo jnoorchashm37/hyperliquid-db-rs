@@ -16,6 +16,8 @@ use crate::{
     utils::unix_timestamp
 };
 
+type RawSnapshotPayload<R> = (u64, Vec<(String, [Vec<R>; 2])>);
+
 #[derive(Clone)]
 pub struct StateSnapshotFetcher {
     snapshot:   Arc<Mutex<Option<StateSnapshot>>>,
@@ -91,7 +93,7 @@ impl StateSnapshotFetcher {
                 .wrap_err(format!("could not create directory: {dir_path:?}"))?;
         }
 
-        let output_path = dir_path.join(&format!("{}.json", unix_timestamp().as_secs()));
+        let output_path = dir_path.join(format!("{}.json", unix_timestamp().as_secs()));
 
         let payload = serde_json::json!({
             "type": "fileSnapshot",
@@ -120,10 +122,8 @@ impl StateSnapshotFetcher {
         O: TryFrom<R, Error = eyre::ErrReport>,
         R: Serialize + for<'a> Deserialize<'a>
     {
-        #[allow(clippy::type_complexity)]
         let file_contents = std::fs::read_to_string(path)?;
-        let (height, snapshot): (u64, Vec<(String, [Vec<R>; 2])>) =
-            serde_json::from_str(&file_contents)?;
+        let (height, snapshot): RawSnapshotPayload<R> = serde_json::from_str(&file_contents)?;
         Ok((
             height,
             Snapshots::new(

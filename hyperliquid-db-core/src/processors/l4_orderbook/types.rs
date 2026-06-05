@@ -21,7 +21,7 @@ impl<O> Snapshots<O> {
 }
 
 impl Snapshots<InnerL4Order> {
-    pub fn as_orderbooks(self, ignore_spot: bool) -> eyre::Result<BTreeMap<String, OrderBook>> {
+    pub fn into_orderbooks(self, ignore_spot: bool) -> eyre::Result<BTreeMap<String, OrderBook>> {
         let mut order_books = BTreeMap::new();
 
         for (coin, mut snapshot) in self.value() {
@@ -350,7 +350,7 @@ mod tests {
             ])
         );
 
-        let order_books = Snapshots::new(snapshots).as_orderbooks(false).unwrap();
+        let order_books = Snapshots::new(snapshots).into_orderbooks(false).unwrap();
 
         assert_eq!(order_books.get("BTC").unwrap().order_count(), 2);
     }
@@ -360,7 +360,7 @@ mod tests {
         let mut snapshots = HashMap::new();
         snapshots.insert(Coin::new("@1"), Snapshot::new([vec![order(1, Side::Bid, 1.0)], vec![]]));
 
-        let order_books = Snapshots::new(snapshots).as_orderbooks(true).unwrap();
+        let order_books = Snapshots::new(snapshots).into_orderbooks(true).unwrap();
 
         assert!(order_books.is_empty());
     }
