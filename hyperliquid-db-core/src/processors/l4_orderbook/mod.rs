@@ -108,7 +108,7 @@ impl L4BookDeriver {
                 .collect::<Result<Vec<_>, _>>()?;
             self.order_status_cache.push(CachedBatch::new(
                 row.block_number,
-                row.block_time_unix()?,
+                row.block_time_unix_ms()?,
                 events,
                 fs_data
             ))?;
@@ -125,7 +125,7 @@ impl L4BookDeriver {
         for row in rows {
             self.book_diff_cache.push(CachedBatch::new(
                 row.block_number,
-                row.block_time_unix()?,
+                row.block_time_unix_ms()?,
                 row.events
                     .iter()
                     .cloned()
@@ -259,7 +259,7 @@ impl L4BookDeriver {
                     let mut order = order_status.order.clone();
                     order.user = Some(order_status.user.clone());
                     order.sz = sz.clone();
-                    convert_trigger(&mut order, order_status.time_unix()?);
+                    convert_trigger(&mut order, order_status.time_unix_ms()?);
                     self.order_books
                         .entry(order.coin.clone())
                         .or_default()

@@ -12,16 +12,16 @@ pub struct NodeOrderStatusesRows {
 }
 
 impl NodeOrderStatusesRows {
-    pub fn local_time_unix(&self) -> eyre::Result<u64> {
+    pub fn local_time_unix_ms(&self) -> eyre::Result<u64> {
         Ok(NaiveDateTime::parse_from_str(&self.local_time, NODE_DATA_DATE_TIME_FORMAT)?
             .and_utc()
-            .timestamp() as u64)
+            .timestamp_millis() as u64)
     }
 
-    pub fn block_time_unix(&self) -> eyre::Result<u64> {
+    pub fn block_time_unix_ms(&self) -> eyre::Result<u64> {
         Ok(NaiveDateTime::parse_from_str(&self.block_time, NODE_DATA_DATE_TIME_FORMAT)?
             .and_utc()
-            .timestamp() as u64)
+            .timestamp_millis() as u64)
     }
 }
 
@@ -340,7 +340,7 @@ mod tests {
             events:       Vec::new()
         };
 
-        assert_eq!(row.local_time_unix().unwrap(), 1_780_617_600);
-        assert_eq!(row.block_time_unix().unwrap(), 1_780_617_601);
+        assert_eq!(row.local_time_unix_ms().unwrap(), 1_780_617_600);
+        assert_eq!(row.block_time_unix_ms().unwrap(), 1_780_617_601);
     }
 }

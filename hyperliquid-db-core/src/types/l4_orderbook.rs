@@ -49,10 +49,10 @@ impl L4OrderStatus {
             || (self.order.is_trigger && self.status == "triggered")
     }
 
-    pub fn time_unix(&self) -> eyre::Result<u64> {
+    pub fn time_unix_ms(&self) -> eyre::Result<u64> {
         Ok(NaiveDateTime::parse_from_str(&self.time, NODE_DATA_DATE_TIME_FORMAT)?
             .and_utc()
-            .timestamp() as u64)
+            .timestamp_millis() as u64)
     }
 }
 

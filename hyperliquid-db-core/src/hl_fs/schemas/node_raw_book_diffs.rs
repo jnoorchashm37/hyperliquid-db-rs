@@ -12,16 +12,16 @@ pub struct NodeRawBookDiffsRows {
 }
 
 impl NodeRawBookDiffsRows {
-    pub fn local_time_unix(&self) -> eyre::Result<u64> {
+    pub fn local_time_unix_ms(&self) -> eyre::Result<u64> {
         Ok(NaiveDateTime::parse_from_str(&self.local_time, NODE_DATA_DATE_TIME_FORMAT)?
             .and_utc()
-            .timestamp() as u64)
+            .timestamp_millis() as u64)
     }
 
-    pub fn block_time_unix(&self) -> eyre::Result<u64> {
+    pub fn block_time_unix_ms(&self) -> eyre::Result<u64> {
         Ok(NaiveDateTime::parse_from_str(&self.block_time, NODE_DATA_DATE_TIME_FORMAT)?
             .and_utc()
-            .timestamp() as u64)
+            .timestamp_millis() as u64)
     }
 }
 
