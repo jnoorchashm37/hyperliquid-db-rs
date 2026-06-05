@@ -355,7 +355,12 @@ impl L2BookTimeComparionMetrics {
         });
 
         let similiar_l2_books_len = similiar_l2_books.len();
-        assert!(similiar_l2_books_len > 0, "no comparable l2 books found");
+        assert!(
+            similiar_l2_books_len > 0,
+            "no comparable l2 books found - \n{:?}\n\n{:?}",
+            cache0.l2_books,
+            cache1.l2_books,
+        );
 
         let mut latency_lag0_ms = Vec::with_capacity(similiar_l2_books_len);
         let mut latency_lag1_ms = Vec::with_capacity(similiar_l2_books_len);
