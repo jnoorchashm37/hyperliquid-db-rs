@@ -81,8 +81,14 @@ impl HyperliquidDataManager {
 
     fn send_data(&mut self, data: HyperliquidDirDataWithMeta) -> eyre::Result<()> {
         self.processors.iter_mut().try_for_each(|processor| {
-            if let Some(processed_data) = processor.handle_data(&data).transpose() {
-                self.parsed_data_tx.send(Arc::new(processed_data))?;
+            match processor.handle_data(&data) {
+                Ok(results) => results.into_iter().try_for_each(|processed_data| {
+                    self.parsed_data_tx.send(Arc::new(Ok(processed_data)))?;
+                    eyre::Ok(())
+                })?,
+                Err(error) => {
+                    self.parsed_data_tx.send(Arc::new(Err(error)))?;
+                }
             }
 
             eyre::Ok(())

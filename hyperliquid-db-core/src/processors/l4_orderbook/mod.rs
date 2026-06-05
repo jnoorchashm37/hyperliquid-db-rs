@@ -371,7 +371,7 @@ impl HyperliquidDataProcessorHandle for L4BookDeriver {
     fn handle_data(
         &mut self,
         data: &HyperliquidDirDataWithMeta
-    ) -> eyre::Result<Option<HyperliquidData>> {
+    ) -> eyre::Result<Vec<HyperliquidData>> {
         let processing_data_at_ns = unix_timestamp().as_nanos();
 
         match &data.data {
@@ -381,21 +381,21 @@ impl HyperliquidDataProcessorHandle for L4BookDeriver {
             HyperliquidDirData::NodeRawBookDiffs(rows) => {
                 self.receive_book_diffs(rows, &data.pipeline_meta)?;
             }
-            _ => return Ok(None)
+            _ => return Ok(Vec::new())
         }
 
         if !self.try_initialize_from_snapshot()? {
-            return Ok(None);
+            return Ok(Vec::new());
         }
 
         let mut out = self.process_pending_snapshots(&data.pipeline_meta, processing_data_at_ns);
         out.extend(self.process_ready_batches(processing_data_at_ns)?);
 
         if !self.is_ready() {
-            return Ok(None);
+            return Ok(Vec::new());
         }
 
-        if out.is_empty() { Ok(None) } else { Ok(Some(HyperliquidData::L4Book(out))) }
+        if out.is_empty() { Ok(Vec::new()) } else { Ok(vec![HyperliquidData::L4Book(out)]) }
     }
 }
 
@@ -482,7 +482,9 @@ mod tests {
                 data:          HyperliquidDirData::NodeOrderStatuses(vec![status_row()]),
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
             })
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .next();
 
         assert!(first.is_none());
         assert_eq!(deriver.pending_batch_count(), 1);
@@ -492,7 +494,9 @@ mod tests {
                 data:          HyperliquidDirData::NodeRawBookDiffs(vec![diff_row()]),
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
             })
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .next();
 
         assert!(second.is_none());
         assert_eq!(deriver.pending_batch_count(), 2);
@@ -508,7 +512,9 @@ mod tests {
                 data:          HyperliquidDirData::NodeOrderStatuses(vec![status_row()]),
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
             })
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .next();
 
         assert!(first.is_none());
         assert_eq!(deriver.pending_batch_count(), 1);
@@ -519,6 +525,8 @@ mod tests {
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
             })
             .unwrap()
+            .into_iter()
+            .next()
             .expect("matched batches should emit an l4 update");
 
         let HyperliquidData::L4Book(books) = second else { unreachable!() };
@@ -550,6 +558,8 @@ mod tests {
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
             })
             .unwrap()
+            .into_iter()
+            .next()
             .expect("initialization should emit l4 snapshots");
 
         let HyperliquidData::L4Book(books) = out else { unreachable!() };
@@ -586,7 +596,9 @@ mod tests {
                 )]),
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
             })
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .next();
 
         assert!(out.is_none());
         assert!(!deriver.is_ready());

@@ -10,5 +10,5 @@ pub trait HyperliquidDataProcessorHandle: Send {
     fn handle_data(
         &mut self,
         data: &HyperliquidDirDataWithMeta
-    ) -> eyre::Result<Option<HyperliquidData>>;
+    ) -> eyre::Result<Vec<HyperliquidData>>;
 }

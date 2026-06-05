@@ -64,12 +64,12 @@ impl HyperliquidDataProcessorHandle for TradeDeriver {
     fn handle_data(
         &mut self,
         data: &HyperliquidDirDataWithMeta
-    ) -> eyre::Result<Option<HyperliquidData>> {
+    ) -> eyre::Result<Vec<HyperliquidData>> {
         let processing_data_at_ns = unix_timestamp().as_nanos();
 
         let fills = match &data.data {
             HyperliquidDirData::NodeFills(items) => items.clone(),
-            _ => return Ok(None)
+            _ => return Ok(Vec::new())
         };
 
         let mut trades = Vec::new();
@@ -81,7 +81,7 @@ impl HyperliquidDataProcessorHandle for TradeDeriver {
             }
         }
 
-        if trades.is_empty() { Ok(None) } else { Ok(Some(HyperliquidData::Trades(trades))) }
+        if trades.is_empty() { Ok(Vec::new()) } else { Ok(vec![HyperliquidData::Trades(trades)]) }
     }
 }
 
