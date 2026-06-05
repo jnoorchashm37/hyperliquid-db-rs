@@ -363,7 +363,7 @@ impl L2BookTimeComparionMetrics {
         let similiar_l2_books_len = similiar_l2_books.len();
         assert!(
             similiar_l2_books_len > 0,
-            "no comparable l2 books found - {} count: {}, time range: {:?}, sample: {:?}; {} \
+            "no comparable l2 books found - {} count: {}, time range: {:?}, sample: {:?};\n\n {} \
              count: {}, time range: {:?}, sample: {:?}",
             cache0.name,
             cache0.l2_books.len(),
