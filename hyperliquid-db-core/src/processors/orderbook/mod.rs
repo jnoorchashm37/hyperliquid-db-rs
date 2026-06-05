@@ -18,7 +18,7 @@ use crate::{
     },
     processors::{
         HyperliquidDataProcessorHandle,
-        l4_orderbook::{
+        orderbook::{
             book::OrderBook,
             types::{Coin, InnerL4Order, Sz},
             utils::coin_to_book_updates

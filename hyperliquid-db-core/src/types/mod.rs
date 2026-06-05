@@ -1,7 +1,7 @@
 mod trades;
 
-mod l4_orderbook;
-pub use l4_orderbook::{
+mod l4_book;
+pub use l4_book::{
     L4Book, L4BookDiff, L4BookUpdates, L4Order, L4OrderBuilder, L4OrderDiff, L4OrderStatus
 };
 
@@ -9,8 +9,8 @@ mod common;
 pub use common::*;
 use serde::{Deserialize, Serialize};
 pub use trades::{PendingTrade, Trade};
-mod l2_orderbook;
-pub use l2_orderbook::L2Book;
+mod l2_book;
+pub use l2_book::L2Book;
 use strum::IntoEnumIterator;
 
 use crate::{fs_handlers::types::FsOutData, hl_fs::HyperliquidDirKind};

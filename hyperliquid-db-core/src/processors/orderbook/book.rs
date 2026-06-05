@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::{
-    processors::l4_orderbook::types::{InnerL4Order, Px, Sz},
+    processors::orderbook::types::{InnerL4Order, Px, Sz},
     types::{L4Order, Side}
 };
 
@@ -164,7 +164,7 @@ impl OrderBook {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::processors::l4_orderbook::types::{Coin, Px, Sz};
+    use crate::processors::orderbook::types::{Coin, Px, Sz};
 
     #[test]
     fn matching_uses_fixed_point_size_math() {

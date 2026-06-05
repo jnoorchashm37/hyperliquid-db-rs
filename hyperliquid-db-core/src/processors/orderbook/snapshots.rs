@@ -8,7 +8,7 @@ use eyre::{Context, ContextCompat};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    processors::l4_orderbook::{
+    processors::orderbook::{
         FETCH_SNAPSHOT_SLEEP_TIME_SEC,
         types::{Coin, InnerL4Order, Snapshot, Snapshots}
     },
