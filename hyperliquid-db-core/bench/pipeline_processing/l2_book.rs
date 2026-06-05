@@ -8,7 +8,7 @@ use std::{
 
 use hyperliquid_db_core::{
     types::{
-        HyperliquidData, HyperliquidDataKind, HyperliquidDataWithMeta, L2Book,
+        HyperliquidData, HyperliquidDataKind, HyperliquidDataWithMeta, L2Book, L2BookLevel,
         ParsedDataPipelineMeta
     },
     utils::{NS_PER_MS, unix_timestamp}
@@ -21,6 +21,8 @@ use crate::utils::{set_hl_websocket_read_timeout, spawn_hl_trades_websocket, spa
 const TIMEOUT_SECS: u64 = 60;
 const PUBLIC_WS_READ_TIMEOUT_MS: u64 = 100;
 const L2_BOOK_COIN: &str = "BTC";
+const L2_COMPARISON_DEPTH: usize = 20;
+const DECIMAL_MULTIPLIER: f64 = 100_000_000.0;
 static IS_RUNNING: AtomicBool = AtomicBool::new(true);
 
 pub fn run_l2_book_ws_bench() -> eyre::Result<()> {
@@ -348,30 +350,42 @@ impl L2BookTimeComparionMetrics {
         let mut cache0_l2_books_by_key = cache0
             .l2_books
             .iter()
-            .map(|l2_book| (l2_book.l2_book.data.clone(), l2_book.clone()))
+            .filter_map(|l2_book| {
+                Some((l2_book_comparison_key(&l2_book.l2_book.data)?, l2_book.clone()))
+            })
             .collect::<HashMap<_, _>>();
 
         let mut similiar_l2_books = Vec::new();
 
         cache1.l2_books.iter().for_each(|l2_book| {
-            if let Some(cach0_l2_book) = cache0_l2_books_by_key.remove(&l2_book.l2_book.data) {
-                // assert_eq!(&l2_book.l2_book, cach0_l2_book);
+            let Some(key) = l2_book_comparison_key(&l2_book.l2_book.data) else {
+                return;
+            };
+
+            if let Some(cach0_l2_book) = cache0_l2_books_by_key.remove(&key) {
                 similiar_l2_books.push((cach0_l2_book.clone(), l2_book.clone()));
             }
         });
 
+        let cache0_live_l2_books_len = live_l2_book_count(&cache0.l2_books);
+        let cache1_live_l2_books_len = live_l2_book_count(&cache1.l2_books);
         let similiar_l2_books_len = similiar_l2_books.len();
         assert!(
             similiar_l2_books_len > 0,
-            "no comparable l2 books found - {} count: {}, time range: {:?}, sample: {:?};\n\n {} \
-             count: {}, time range: {:?}, sample: {:?}",
+            "no comparable live l2 books found - {} count: {}, live comparable count: {}, time \
+             range: {:?}, live time range: {:?}, sample: {:?};\n\n {} count: {}, live comparable \
+             count: {}, time range: {:?}, live time range: {:?}, sample: {:?}",
             cache0.name,
             cache0.l2_books.len(),
+            cache0_live_l2_books_len,
             l2_book_time_range(&cache0.l2_books),
+            live_l2_book_time_range(&cache0.l2_books),
             cache0.l2_books.first().map(|l2_book| &l2_book.l2_book.data),
             cache1.name,
             cache1.l2_books.len(),
+            cache1_live_l2_books_len,
             l2_book_time_range(&cache1.l2_books),
+            live_l2_book_time_range(&cache1.l2_books),
             cache1.l2_books.first().map(|l2_book| &l2_book.l2_book.data),
         );
 
@@ -664,6 +678,53 @@ fn percentile_f64(samples: &[f64], percentile: f64) -> f64 {
     samples[idx]
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct L2BookComparisonKey {
+    coin:   String,
+    time:   u64,
+    levels: [Vec<L2BookComparisonLevel>; 2]
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct L2BookComparisonLevel {
+    px: u64,
+    sz: u64,
+    n:  u64
+}
+
+fn l2_book_comparison_key(l2_book: &L2Book) -> Option<L2BookComparisonKey> {
+    if l2_book.time == 0 {
+        return None;
+    }
+
+    Some(L2BookComparisonKey {
+        coin:   l2_book.coin.clone(),
+        time:   l2_book.time,
+        levels: [
+            l2_book_comparison_levels(l2_book.bids())?,
+            l2_book_comparison_levels(l2_book.asks())?
+        ]
+    })
+}
+
+fn l2_book_comparison_levels(levels: &[L2BookLevel]) -> Option<Vec<L2BookComparisonLevel>> {
+    levels
+        .iter()
+        .take(L2_COMPARISON_DEPTH)
+        .map(|level| {
+            Some(L2BookComparisonLevel {
+                px: parse_decimal_comparison_value(&level.px)?,
+                sz: parse_decimal_comparison_value(&level.sz)?,
+                n:  level.n
+            })
+        })
+        .collect()
+}
+
+fn parse_decimal_comparison_value(value: &str) -> Option<u64> {
+    Some((value.parse::<f64>().ok()? * DECIMAL_MULTIPLIER).round() as u64)
+}
+
 fn avg_f64(samples: &[f64]) -> f64 {
     samples.iter().sum::<f64>() / samples.len() as f64
 }
@@ -682,4 +743,29 @@ fn l2_book_time_range(l2_books: &[TimestampedL2Book]) -> Option<(u64, u64)> {
         .map(|l2_book| l2_book.l2_book.data.time)
         .max()?;
     Some((min, max))
+}
+
+fn live_l2_book_time_range(l2_books: &[TimestampedL2Book]) -> Option<(u64, u64)> {
+    let min = l2_books
+        .iter()
+        .filter_map(|l2_book| {
+            (l2_book_comparison_key(&l2_book.l2_book.data).is_some())
+                .then_some(l2_book.l2_book.data.time)
+        })
+        .min()?;
+    let max = l2_books
+        .iter()
+        .filter_map(|l2_book| {
+            (l2_book_comparison_key(&l2_book.l2_book.data).is_some())
+                .then_some(l2_book.l2_book.data.time)
+        })
+        .max()?;
+    Some((min, max))
+}
+
+fn live_l2_book_count(l2_books: &[TimestampedL2Book]) -> usize {
+    l2_books
+        .iter()
+        .filter(|l2_book| l2_book_comparison_key(&l2_book.l2_book.data).is_some())
+        .count()
 }

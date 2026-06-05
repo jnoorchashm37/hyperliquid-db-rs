@@ -64,6 +64,10 @@ impl OrderBook {
     }
 
     pub fn modify_sz(&mut self, oid: u64, sz: Sz) -> bool {
+        if !sz.is_positive() {
+            return self.cancel_order(oid);
+        }
+
         let Some((side, px)) = self.oid_to_side_px.get(&oid).copied() else {
             return false;
         };
