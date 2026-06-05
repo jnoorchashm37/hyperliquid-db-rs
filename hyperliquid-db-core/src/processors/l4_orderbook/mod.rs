@@ -425,18 +425,18 @@ fn builder_from_value(value: &Value) -> eyre::Result<L4OrderBuilder> {
     Ok(L4OrderBuilder { b: string_field(value, "b")?.to_string(), f: u64_field(value, "f")? })
 }
 
-// fn book_diff_from_value(value: &Value) -> eyre::Result<L4BookDiff> {
-//     Ok(L4BookDiff {
-//         user:          string_field(value, "user")?.to_string(),
-//         oid:           u64_field(value, "oid")?,
-//         coin:          string_field(value, "coin")?.to_string(),
-//         side:          optional_string_field(value, "side")?
-//             .map(|side| side_from_str(&side))
-//             .transpose()?,
-//         px:            decimal_string(json_field(value, "px")?)?,
-//         raw_book_diff: order_diff_from_value(json_field(value,
-// "raw_book_diff")?)?     })
-// }
+fn book_diff_from_value(value: &Value) -> eyre::Result<L4BookDiff> {
+    Ok(L4BookDiff {
+        user:          string_field(value, "user")?.to_string(),
+        oid:           u64_field(value, "oid")?,
+        coin:          string_field(value, "coin")?.to_string(),
+        side:          optional_string_field(value, "side")?
+            .map(|side| side_from_str(&side))
+            .transpose()?,
+        px:            decimal_string(json_field(value, "px")?)?,
+        raw_book_diff: order_diff_from_value(json_field(value, "raw_book_diff")?)?
+    })
+}
 
 fn order_from_value(value: &Value) -> eyre::Result<L4Order> {
     Ok(L4Order {
