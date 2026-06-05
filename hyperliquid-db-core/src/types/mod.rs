@@ -56,11 +56,10 @@ impl HyperliquidDataKind {
     pub fn required_dirs(&self) -> Vec<HyperliquidDirKind> {
         match self {
             HyperliquidDataKind::Trades => vec![HyperliquidDirKind::NodeFills],
-            HyperliquidDataKind::L4Book | HyperliquidDataKind::L2Book => vec![
-                HyperliquidDirKind::NodeFills,
-                HyperliquidDirKind::NodeOrderStatuses,
-                HyperliquidDirKind::NodeRawBookDiffs,
-            ]
+            HyperliquidDataKind::L4Book => {
+                vec![HyperliquidDirKind::NodeOrderStatuses, HyperliquidDirKind::NodeRawBookDiffs]
+            }
+            HyperliquidDataKind::L2Book => vec![HyperliquidDirKind::NodeRawBookDiffs]
         }
     }
 

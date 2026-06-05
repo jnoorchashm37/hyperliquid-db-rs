@@ -20,7 +20,7 @@ use crate::{
         HyperliquidDataProcessorHandle,
         orderbook::{
             book::OrderBook,
-            types::{Coin, InnerL4Order, Sz},
+            types::{Coin, InnerL4Order, Px, Sz},
             utils::coin_to_book_updates
         }
     },
@@ -71,6 +71,10 @@ impl OrderBookDeriver {
 
     pub fn is_ready(&self) -> bool {
         self.snapshot_height.is_some()
+    }
+
+    fn is_l2_only(&self) -> bool {
+        self.outputs.l2 && !self.outputs.l4
     }
 
     pub fn compute_snapshots(&self) -> Option<Vec<L4Book>> {
@@ -130,6 +134,28 @@ impl OrderBookDeriver {
             current_height = self.snapshot_height.unwrap_or(height),
             order_count = self.order_count(),
             "l4 order book ready"
+        );
+        Ok(true)
+    }
+
+    fn try_initialize_l2_from_snapshot(&mut self) -> eyre::Result<bool> {
+        if self.is_ready() {
+            return Ok(true);
+        }
+
+        let Some(StateSnapshot { height, snapshots }) = self.state_snapshot.write(Option::take)?
+        else {
+            return Ok(false);
+        };
+
+        self.order_books = snapshots.into_orderbooks(self.ignore_spot)?;
+        self.snapshot_height = Some(height);
+        self.book_time = 0;
+        self.snapshots_pending = true;
+        tracing::info!(
+            snapshot_height = height,
+            order_count = self.order_count(),
+            "l2 order book ready"
         );
         Ok(true)
     }
@@ -265,6 +291,109 @@ impl OrderBookDeriver {
         }
 
         Ok(out)
+    }
+
+    fn process_l2_book_diff_batches(
+        &mut self,
+        processing_data_at_ns: u128
+    ) -> eyre::Result<ProcessedOrderBookData> {
+        let mut out = ProcessedOrderBookData::default();
+
+        while let Some(book_diffs) = self.book_diff_cache.pop_front() {
+            let Some(current_height) = self.snapshot_height else {
+                return Ok(out);
+            };
+
+            if book_diffs.block_number <= current_height {
+                continue;
+            }
+
+            if book_diffs.block_number > current_height.saturating_add(1) {
+                tracing::debug!(
+                    expected_height = current_height.saturating_add(1),
+                    actual_height = book_diffs.block_number,
+                    "applying next available l2 raw book diff batch"
+                );
+            }
+
+            if let Err(error) = self.apply_l2_book_diffs(&book_diffs) {
+                tracing::info!(
+                    ?error,
+                    "Failed to apply l2 raw book diffs. Waiting for next snapshot."
+                );
+                self.reset_after_apply_error();
+                return Ok(ProcessedOrderBookData::default());
+            }
+
+            self.snapshot_height = Some(book_diffs.block_number);
+            self.book_time = book_diffs.time;
+
+            let mut pipeline_meta = book_diffs.pipeline_meta.clone();
+            pipeline_meta.processing_data_at_ns = processing_data_at_ns;
+            pipeline_meta.processed_data_at_ns = unix_timestamp().as_nanos();
+
+            out.l2.extend(self.l2_updates_for_book_diffs(
+                &book_diffs.events,
+                book_diffs.time,
+                pipeline_meta
+            ));
+        }
+
+        Ok(out)
+    }
+
+    fn apply_l2_book_diffs(&mut self, book_diffs: &CachedBatch<L4BookDiff>) -> eyre::Result<()> {
+        for diff in &book_diffs.events {
+            if self.ignore_spot && Coin::new(&diff.coin).is_spot() {
+                continue;
+            }
+
+            match &diff.raw_book_diff {
+                L4OrderDiff::New { sz } => {
+                    let order = InnerL4Order {
+                        user:              diff.user.clone(),
+                        coin:              Coin::new(&diff.coin),
+                        side:              diff.side,
+                        limit_px:          Px::new_f64(diff.px),
+                        sz:                Sz::new_f64(*sz),
+                        oid:               diff.oid,
+                        timestamp:         book_diffs.time,
+                        trigger_condition: "N/A".to_string(),
+                        is_trigger:        false,
+                        trigger_px:        0.0,
+                        is_position_tpsl:  false,
+                        reduce_only:       false,
+                        order_type:        "Limit".to_string(),
+                        tif:               Some("Gtc".to_string()),
+                        cloid:             None
+                    };
+                    self.order_books
+                        .entry(diff.coin.clone())
+                        .or_default()
+                        .add_order(order)?;
+                }
+                L4OrderDiff::Update { new_sz, .. } => {
+                    if !self
+                        .order_books
+                        .get_mut(&diff.coin)
+                        .is_some_and(|book| book.modify_sz(diff.oid, Sz::new_f64(*new_sz)))
+                    {
+                        return Err(eyre::eyre!("unable to find order on the book: {diff:?}"));
+                    }
+                }
+                L4OrderDiff::Remove => {
+                    if !self
+                        .order_books
+                        .get_mut(&diff.coin)
+                        .is_some_and(|book| book.cancel_order(diff.oid))
+                    {
+                        return Err(eyre::eyre!("unable to find order on the book: {diff:?}"));
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn l2_updates_for_book_diffs(
@@ -446,6 +575,24 @@ impl HyperliquidDataProcessorHandle for OrderBookDeriver {
         data: &HyperliquidDirDataWithMeta
     ) -> eyre::Result<Vec<HyperliquidData>> {
         let processing_data_at_ns = unix_timestamp().as_nanos();
+
+        if self.is_l2_only() {
+            let HyperliquidDirData::NodeRawBookDiffs(rows) = &data.data else {
+                return Ok(Vec::new());
+            };
+
+            self.receive_book_diffs(rows, &data.pipeline_meta)?;
+
+            if !self.try_initialize_l2_from_snapshot()? {
+                return Ok(Vec::new());
+            }
+
+            let mut out =
+                self.process_pending_snapshots(&data.pipeline_meta, processing_data_at_ns);
+            out.extend(self.process_l2_book_diff_batches(processing_data_at_ns)?);
+
+            return if out.is_empty() { Ok(Vec::new()) } else { Ok(out.into_hyperliquid_data()) };
+        }
 
         match &data.data {
             HyperliquidDirData::NodeOrderStatuses(rows) => {
@@ -795,15 +942,42 @@ mod tests {
 
         let out = deriver
             .handle_data(&HyperliquidDirDataWithMeta {
-                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
-                    1019927125
-                )]),
-                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![diff_row()]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
             })
             .unwrap();
 
         assert_eq!(out.len(), 1);
         assert!(matches!(out[0], HyperliquidData::L2Book(_)));
+    }
+
+    #[test]
+    fn l2_only_applies_raw_book_diffs_without_order_statuses() {
+        let mut deriver = OrderBookDeriver::for_data_kinds(&[HyperliquidDataKind::L2Book]);
+        deriver.state_snapshot = StateSnapshotFetcher::with_snapshot(StateSnapshot {
+            height:    1019927124,
+            snapshots: Snapshots::new(HashMap::new())
+        });
+
+        let out = deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![diff_row()]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap();
+
+        assert_eq!(out.len(), 1);
+        let HyperliquidData::L2Book(books) = &out[0] else { unreachable!() };
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].data.coin, "JTO");
+        assert_eq!(books[0].data.time, 1780394399398);
+        assert!(books[0].data.bids().is_empty());
+
+        let asks = books[0].data.asks();
+        assert_eq!(asks.len(), 1);
+        assert_eq!(asks[0].px, "0.65313");
+        assert_eq!(asks[0].sz, "1096");
+        assert_eq!(asks[0].n, 1);
     }
 
     fn request_all_orderbook_outputs(deriver: &mut OrderBookDeriver) {

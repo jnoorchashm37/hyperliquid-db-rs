@@ -46,6 +46,12 @@ pub fn run_l2_book_ws_bench() -> eyre::Result<()> {
         .join()
         .map_err(|_| eyre::eyre!("implemented stream thread panicked"))??;
 
+    println!(
+        "collected {} public ws l2 books and {} pipeline l2 books",
+        public_ws_stream.l2_books.len(),
+        implemented_stream.l2_books.len()
+    );
+
     let comparison =
         L2BookTimeComparionMetrics::compare_l2_book_caches(public_ws_stream, implemented_stream);
 
@@ -357,9 +363,16 @@ impl L2BookTimeComparionMetrics {
         let similiar_l2_books_len = similiar_l2_books.len();
         assert!(
             similiar_l2_books_len > 0,
-            "no comparable l2 books found - \n{:?}\n\n{:?}",
-            cache0.l2_books,
-            cache1.l2_books,
+            "no comparable l2 books found - {} count: {}, time range: {:?}, sample: {:?}; {} \
+             count: {}, time range: {:?}, sample: {:?}",
+            cache0.name,
+            cache0.l2_books.len(),
+            l2_book_time_range(&cache0.l2_books),
+            cache0.l2_books.first().map(|l2_book| &l2_book.l2_book.data),
+            cache1.name,
+            cache1.l2_books.len(),
+            l2_book_time_range(&cache1.l2_books),
+            cache1.l2_books.first().map(|l2_book| &l2_book.l2_book.data),
         );
 
         let mut latency_lag0_ms = Vec::with_capacity(similiar_l2_books_len);
@@ -657,4 +670,16 @@ fn avg_f64(samples: &[f64]) -> f64 {
 
 fn delta_ms(later_ns: u128, earlier_ns: u128) -> f64 {
     (later_ns as f64 - earlier_ns as f64) / NS_PER_MS as f64
+}
+
+fn l2_book_time_range(l2_books: &[TimestampedL2Book]) -> Option<(u64, u64)> {
+    let min = l2_books
+        .iter()
+        .map(|l2_book| l2_book.l2_book.data.time)
+        .min()?;
+    let max = l2_books
+        .iter()
+        .map(|l2_book| l2_book.l2_book.data.time)
+        .max()?;
+    Some((min, max))
 }
