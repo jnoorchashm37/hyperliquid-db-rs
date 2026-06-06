@@ -44,6 +44,7 @@ pub struct OrderBookDeriver {
     streaming_block_cache:       StreamingBlockCache,
     order_books:                 BTreeMap<String, OrderBook>,
     state_snapshot:              StateSnapshotFetcher,
+    pending_snapshot:            Option<StateSnapshot>,
     snapshot_height:             Option<u64>,
     book_time:                   u64,
     snapshots_pending:           bool,
@@ -117,46 +118,87 @@ impl OrderBookDeriver {
             return Ok(true);
         }
 
-        let Some(StateSnapshot { height, snapshots }) = self.state_snapshot.write(Option::take)?
-        else {
-            if !self.logged_waiting_for_snapshot {
-                println!(
-                    "[orderbook deriver] waiting for state snapshot before emitting books; \
-                     pending_order_status_batches={} pending_book_diff_batches={}",
-                    self.pending_order_status_batch_count(),
-                    self.pending_book_diff_batch_count()
-                );
-                self.logged_waiting_for_snapshot = true;
-            }
+        if self.pending_snapshot.is_none() {
+            let Some(snapshot) = self.state_snapshot.write(Option::take)? else {
+                if !self.logged_waiting_for_snapshot {
+                    println!(
+                        "[orderbook deriver] waiting for state snapshot before emitting books; \
+                         pending_order_status_batches={} pending_book_diff_batches={}",
+                        self.pending_order_status_batch_count(),
+                        self.pending_book_diff_batch_count()
+                    );
+                    self.logged_waiting_for_snapshot = true;
+                }
+                return Ok(false);
+            };
+            self.logged_waiting_for_snapshot = false;
+            println!(
+                "[orderbook deriver] initializing from snapshot height={}; \
+                 pending_order_status_batches={} pending_book_diff_batches={}",
+                snapshot.height,
+                self.pending_order_status_batch_count(),
+                self.pending_book_diff_batch_count()
+            );
+            self.pending_snapshot = Some(snapshot);
+        }
+
+        self.try_initialize_pending_snapshot()
+    }
+
+    fn try_initialize_pending_snapshot(&mut self) -> eyre::Result<bool> {
+        let Some(StateSnapshot { height, snapshots }) = self.pending_snapshot.take() else {
             return Ok(false);
         };
-        self.logged_waiting_for_snapshot = false;
-        println!(
-            "[orderbook deriver] initializing from snapshot height={height}; \
-             pending_order_status_batches={} pending_book_diff_batches={}",
-            self.pending_order_status_batch_count(),
-            self.pending_book_diff_batch_count()
-        );
 
-        self.order_books = snapshots.into_orderbooks(self.ignore_spot)?;
-        self.snapshot_height = Some(height);
-        self.book_time = 0;
-        self.push_ready_streaming_batches()?;
+        self.push_ready_streaming_batches_from_height(height)?;
+        if !self.has_cached_pair() {
+            self.pending_snapshot = Some(StateSnapshot { height, snapshots });
+            return Ok(false);
+        }
 
-        if let Err(error) = self.apply_cached_batches() {
-            println!(
-                "[orderbook deriver] failed to apply cached batches after snapshot \
-                 height={height}; waiting for next snapshot: {error:?}"
-            );
-            tracing::info!(
-                ?error,
-                "Failed to apply updates to this book (likely missing older updates). Waiting for \
-                 next snapshot."
-            );
+        let mut candidate_order_books = snapshots.into_orderbooks(self.ignore_spot)?;
+        let mut candidate_height = height;
+        let mut candidate_book_time = 0;
+        let mut replayed_batches = 0;
+
+        while let Some((order_statuses, book_diffs)) = self.pop_cache() {
+            match Self::apply_cached_batch_to_state(
+                &mut candidate_order_books,
+                &mut candidate_height,
+                &mut candidate_book_time,
+                self.ignore_spot,
+                &order_statuses,
+                &book_diffs
+            ) {
+                Ok(applied) => {
+                    if applied {
+                        replayed_batches += 1;
+                    }
+                }
+                Err(error) => {
+                    println!(
+                        "[orderbook deriver] failed to apply cached batches after snapshot \
+                         height={height}; waiting for next snapshot: {error:?}"
+                    );
+                    tracing::info!(
+                        ?error,
+                        "Failed to apply updates to this book (likely missing older updates). \
+                         Waiting for next snapshot."
+                    );
+                    self.reset_after_apply_error();
+                    return Ok(false);
+                }
+            }
+        }
+
+        if replayed_batches == 0 {
             self.reset_after_apply_error();
             return Ok(false);
         }
 
+        self.order_books = candidate_order_books;
+        self.snapshot_height = Some(candidate_height);
+        self.book_time = candidate_book_time;
         self.snapshots_pending = true;
         tracing::info!(
             snapshot_height = height,
@@ -180,6 +222,7 @@ impl OrderBookDeriver {
         self.book_diff_cache = Default::default();
         self.streaming_block_cache = Default::default();
         self.order_books.clear();
+        self.pending_snapshot = None;
         self.snapshot_height = None;
         self.book_time = 0;
         self.snapshots_pending = false;
@@ -237,6 +280,13 @@ impl OrderBookDeriver {
         let Some(snapshot_height) = self.snapshot_height else {
             return Ok(());
         };
+        self.push_ready_streaming_batches_from_height(snapshot_height)
+    }
+
+    fn push_ready_streaming_batches_from_height(
+        &mut self,
+        snapshot_height: u64
+    ) -> eyre::Result<()> {
         let next_block = snapshot_height
             .checked_add(1)
             .ok_or_else(|| eyre::eyre!("l4 order book snapshot height overflow"))?;
@@ -248,6 +298,32 @@ impl OrderBookDeriver {
         }
 
         Ok(())
+    }
+
+    fn has_cached_pair(&mut self) -> bool {
+        loop {
+            let Some(diff_block) = self.book_diff_cache.front().map(|batch| batch.block_number)
+            else {
+                return false;
+            };
+            let Some(status_block) = self
+                .order_status_cache
+                .front()
+                .map(|batch| batch.block_number)
+            else {
+                return false;
+            };
+
+            match diff_block.cmp(&status_block) {
+                Ordering::Less => {
+                    self.book_diff_cache.pop_front();
+                }
+                Ordering::Equal => return true,
+                Ordering::Greater => {
+                    self.order_status_cache.pop_front();
+                }
+            }
+        }
     }
 
     fn pop_cache(&mut self) -> Option<(CachedBatch<L4OrderStatus>, CachedBatch<L4BookDiff>)> {
@@ -428,16 +504,33 @@ impl OrderBookDeriver {
         out
     }
 
-    fn apply_cached_batches(&mut self) -> eyre::Result<()> {
-        while let Some((order_statuses, book_diffs)) = self.pop_cache() {
-            self.apply_cached_batch(&order_statuses, &book_diffs)?;
-        }
-
-        Ok(())
-    }
-
     fn apply_cached_batch(
         &mut self,
+        order_statuses: &CachedBatch<L4OrderStatus>,
+        book_diffs: &CachedBatch<L4BookDiff>
+    ) -> eyre::Result<bool> {
+        let Some(mut current_height) = self.snapshot_height else {
+            return Err(eyre::eyre!("cannot apply l4 order book batch before snapshot"));
+        };
+
+        let applied = Self::apply_cached_batch_to_state(
+            &mut self.order_books,
+            &mut current_height,
+            &mut self.book_time,
+            self.ignore_spot,
+            order_statuses,
+            book_diffs
+        )?;
+        self.snapshot_height = Some(current_height);
+
+        Ok(applied)
+    }
+
+    fn apply_cached_batch_to_state(
+        order_books: &mut BTreeMap<String, OrderBook>,
+        current_height: &mut u64,
+        book_time: &mut u64,
+        ignore_spot: bool,
         order_statuses: &CachedBatch<L4OrderStatus>,
         book_diffs: &CachedBatch<L4BookDiff>
     ) -> eyre::Result<bool> {
@@ -445,11 +538,7 @@ impl OrderBookDeriver {
             return Err(eyre::eyre!("expected synchronized order status and book diff batches"));
         }
 
-        let Some(current_height) = self.snapshot_height else {
-            return Err(eyre::eyre!("cannot apply l4 order book batch before snapshot"));
-        };
-
-        if order_statuses.block_number <= current_height {
+        if order_statuses.block_number <= *current_height {
             return Ok(false);
         }
 
@@ -464,15 +553,21 @@ impl OrderBookDeriver {
             ));
         }
 
-        self.apply_updates(&order_statuses.events, &book_diffs.events)?;
-        self.snapshot_height = Some(order_statuses.block_number);
-        self.book_time = order_statuses.time;
+        Self::apply_updates_to_books(
+            order_books,
+            ignore_spot,
+            &order_statuses.events,
+            &book_diffs.events
+        )?;
+        *current_height = order_statuses.block_number;
+        *book_time = order_statuses.time;
 
         Ok(true)
     }
 
-    fn apply_updates(
-        &mut self,
+    fn apply_updates_to_books(
+        order_books: &mut BTreeMap<String, OrderBook>,
+        ignore_spot: bool,
         order_statuses: &[L4OrderStatus],
         book_diffs: &[L4BookDiff]
     ) -> eyre::Result<()> {
@@ -483,7 +578,7 @@ impl OrderBookDeriver {
             .collect::<HashMap<_, _>>();
 
         for diff in book_diffs {
-            if self.ignore_spot && Coin::new(&diff.coin).is_spot() {
+            if ignore_spot && Coin::new(&diff.coin).is_spot() {
                 continue;
             }
 
@@ -498,14 +593,13 @@ impl OrderBookDeriver {
                     ))?;
                     order.modify_sz(Sz::new_f64(*sz));
                     order.convert_trigger(order_status.time_unix_ms()?);
-                    self.order_books
+                    order_books
                         .entry(order.coin.value())
                         .or_default()
                         .add_order(order)?;
                 }
                 L4OrderDiff::Update { new_sz, .. } => {
-                    if !self
-                        .order_books
+                    if !order_books
                         .get_mut(&diff.coin)
                         .is_some_and(|book| book.modify_sz(diff.oid, Sz::new_f64(*new_sz)))
                     {
@@ -513,8 +607,7 @@ impl OrderBookDeriver {
                     }
                 }
                 L4OrderDiff::Remove => {
-                    if !self
-                        .order_books
+                    if !order_books
                         .get_mut(&diff.coin)
                         .is_some_and(|book| book.cancel_order(diff.oid))
                     {
@@ -896,7 +989,7 @@ mod tests {
 
     #[test]
     fn waits_for_matching_status_and_diff_batches() {
-        let mut deriver = deriver_with_snapshot(1019927124);
+        let mut deriver = ready_deriver(1019927124);
 
         let first = deriver
             .handle_data(&HyperliquidDirDataWithMeta {
@@ -946,14 +1039,19 @@ mod tests {
         );
         let mut deriver = deriver_with_state_snapshot(1019927124, Snapshots::new(snapshots));
 
-        let out = deriver
+        let first = deriver
             .handle_data(&HyperliquidDirDataWithMeta {
                 data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
                     1019927125
                 )]),
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
             })
-            .unwrap()
+            .unwrap();
+
+        assert!(first.is_empty());
+        assert!(!deriver.is_ready());
+
+        let out = flush_block(&mut deriver, 1019927125)
             .into_iter()
             .next()
             .expect("initialization should emit l4 snapshots");
@@ -965,8 +1063,8 @@ mod tests {
             unreachable!()
         };
         assert_eq!(coin, "BTC");
-        assert_eq!(*time, 0);
-        assert_eq!(*height, 1019927124);
+        assert_eq!(*time, 1780394399398);
+        assert_eq!(*height, 1019927125);
         assert_eq!(levels[0].len(), 1);
         assert_eq!(levels[0][0].oid, 1);
         assert_eq!(levels[0][0].sz, 1.25);
@@ -974,7 +1072,7 @@ mod tests {
 
     #[test]
     fn emits_l2_updates_after_matched_batch() {
-        let mut deriver = deriver_with_snapshot(1019927124);
+        let mut deriver = ready_deriver(1019927124);
         request_all_orderbook_outputs(&mut deriver);
 
         deriver
@@ -1025,7 +1123,7 @@ mod tests {
         let mut deriver = deriver_with_state_snapshot(1019927124, Snapshots::new(snapshots));
         request_all_orderbook_outputs(&mut deriver);
 
-        let out = deriver
+        let first = deriver
             .handle_data(&HyperliquidDirDataWithMeta {
                 data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
                     1019927125
@@ -1034,12 +1132,17 @@ mod tests {
             })
             .unwrap();
 
+        assert!(first.is_empty());
+        assert!(!deriver.is_ready());
+
+        let out = flush_block(&mut deriver, 1019927125);
+
         assert_eq!(out.len(), 2);
 
         let HyperliquidData::L2Book(books) = &out[1] else { unreachable!() };
         assert_eq!(books.len(), 1);
         assert_eq!(books[0].data.coin, "BTC");
-        assert_eq!(books[0].data.time, 0);
+        assert_eq!(books[0].data.time, 1780394399398);
 
         let bids = books[0].data.bids();
         assert_eq!(bids.len(), 1);
@@ -1055,8 +1158,36 @@ mod tests {
     }
 
     #[test]
-    fn only_emits_requested_orderbook_outputs() {
+    fn rejects_bad_post_snapshot_replay_before_emitting_snapshot() {
         let mut deriver = deriver_with_snapshot(1019927124);
+
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![remove_diff_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap();
+
+        let out = flush_block(&mut deriver, 1019927125);
+
+        assert!(out.is_empty());
+        assert!(!deriver.is_ready());
+        assert_eq!(deriver.order_count(), 0);
+    }
+
+    #[test]
+    fn only_emits_requested_orderbook_outputs() {
+        let mut deriver = ready_deriver(1019927124);
         deriver.outputs = super::OrderBookOutputs::for_data_kinds(&[HyperliquidDataKind::L2Book]);
 
         deriver
@@ -1082,7 +1213,7 @@ mod tests {
 
     #[test]
     fn l2_output_waits_for_matching_order_statuses() {
-        let mut deriver = deriver_with_snapshot(1019927124);
+        let mut deriver = ready_deriver(1019927124);
         deriver.outputs = super::OrderBookOutputs::for_data_kinds(&[HyperliquidDataKind::L2Book]);
 
         let first = deriver
@@ -1272,6 +1403,7 @@ mod tests {
             streaming_block_cache:       Default::default(),
             order_books:                 Default::default(),
             state_snapshot:              StateSnapshotFetcher::empty(),
+            pending_snapshot:            None,
             snapshot_height:             None,
             book_time:                   0,
             snapshots_pending:           false,
@@ -1298,6 +1430,7 @@ mod tests {
                 height,
                 snapshots
             }),
+            pending_snapshot:            None,
             snapshot_height:             None,
             book_time:                   0,
             snapshots_pending:           false,
@@ -1314,6 +1447,7 @@ mod tests {
             streaming_block_cache:       Default::default(),
             order_books:                 Default::default(),
             state_snapshot:              StateSnapshotFetcher::empty(),
+            pending_snapshot:            None,
             snapshot_height:             Some(height),
             book_time:                   0,
             snapshots_pending:           false,
