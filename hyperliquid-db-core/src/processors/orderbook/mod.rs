@@ -176,6 +176,9 @@ impl OrderBookDeriver {
     }
 
     fn reset_after_apply_error(&mut self) {
+        self.order_status_cache = Default::default();
+        self.book_diff_cache = Default::default();
+        self.streaming_block_cache = Default::default();
         self.order_books.clear();
         self.snapshot_height = None;
         self.book_time = 0;
@@ -281,6 +284,11 @@ impl OrderBookDeriver {
             let applied = match self.apply_cached_batch(&order_statuses, &book_diffs) {
                 Ok(applied) => applied,
                 Err(error) => {
+                    println!(
+                        "[orderbook deriver] failed to apply live batch block={} \
+                         current_height={:?}; waiting for next snapshot: {error:?}",
+                        order_statuses.block_number, self.snapshot_height
+                    );
                     tracing::info!(
                         ?error,
                         "Failed to apply updates to this book. Waiting for next snapshot."
