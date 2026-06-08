@@ -56,7 +56,16 @@ impl OrderBookDeriver {
     }
 
     pub fn for_data_kinds(data_kinds: &[HyperliquidDataKind]) -> Self {
-        Self { outputs: OrderBookOutputs::for_data_kinds(data_kinds), ..Default::default() }
+        // Match order_book_server, which does not support spot order books. HL
+        // records spot liquidity from a sentinel user (0xfefe..fe) through raw
+        // book diffs that have no matching order-status "open" event, so a spot
+        // `New` aborts the post-snapshot replay with "unable to find order opening
+        // status". Excluding spot keeps the perp books (e.g. BTC) building.
+        Self {
+            outputs: OrderBookOutputs::for_data_kinds(data_kinds),
+            ignore_spot: true,
+            ..Default::default()
+        }
     }
 
     pub fn with_ignore_spot(ignore_spot: bool) -> Self {
