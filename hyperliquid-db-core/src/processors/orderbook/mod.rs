@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc
 };
 
@@ -40,7 +40,6 @@ const FETCH_SNAPSHOT_SLEEP_TIME_SEC: u64 = 5;
 // rates) was the dominant source of derived L2 gaps. Keep the default small and
 // allow overriding via env for tuning.
 const STREAMING_FINALIZATION_BLOCK_DELAY: u64 = 2;
-const STREAMING_FINALIZATION_BLOCK_DELAY_ENV: &str = "ORDERBOOK_FINALIZATION_BLOCK_DELAY";
 
 #[derive(Default)]
 pub struct OrderBookDeriver {
