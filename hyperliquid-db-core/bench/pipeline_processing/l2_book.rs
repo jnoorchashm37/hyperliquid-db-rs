@@ -117,7 +117,7 @@ fn run_public_ws_stream() -> JoinHandle<eyre::Result<L2BookCache>> {
             }
 
             if !IS_RUNNING.load(Ordering::Relaxed) {
-                break
+                break;
             }
         }
 
@@ -210,7 +210,7 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<L2BookCache>> {
             }
 
             if !IS_RUNNING.load(Ordering::Relaxed) {
-                break
+                break;
             }
         }
         println!(

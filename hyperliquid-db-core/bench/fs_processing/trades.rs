@@ -86,7 +86,7 @@ fn run_public_ws_stream() -> JoinHandle<eyre::Result<TradeCache>> {
             }
 
             if !IS_RUNNING.load(Ordering::Relaxed) {
-                break
+                break;
             }
         }
 
@@ -149,7 +149,7 @@ fn run_implemented_stream() -> JoinHandle<eyre::Result<TradeCache>> {
             }
 
             if !IS_RUNNING.load(Ordering::Relaxed) {
-                break
+                break;
             }
         }
         Ok(cache)
