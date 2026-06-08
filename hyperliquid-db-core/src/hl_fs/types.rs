@@ -34,6 +34,23 @@ impl HyperliquidDirData {
             HyperliquidDirData::NodeRawBookDiffs(_) => HyperliquidDirKind::NodeRawBookDiffs
         }
     }
+
+    pub fn transpose(self) -> Vec<HyperliquidDirDataSingle> {
+        match self {
+            HyperliquidDirData::NodeOrderStatuses(items) => items
+                .into_iter()
+                .map(HyperliquidDirDataSingle::NodeOrderStatuses)
+                .collect(),
+            HyperliquidDirData::NodeRawBookDiffs(items) => items
+                .into_iter()
+                .map(HyperliquidDirDataSingle::NodeRawBookDiffs)
+                .collect(),
+            HyperliquidDirData::NodeFills(items) => items
+                .into_iter()
+                .map(HyperliquidDirDataSingle::NodeFills)
+                .collect()
+        }
+    }
 }
 
 impl From<Vec<NodeFillsRow>> for HyperliquidDirData {
@@ -94,5 +111,22 @@ impl fmt::Display for HyperliquidDirKind {
 impl fmt::Debug for HyperliquidDirKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
+    }
+}
+
+#[derive(Debug, Clone, PartialOrd, PartialEq)]
+pub enum HyperliquidDirDataSingle {
+    NodeOrderStatuses(NodeOrderStatusesRows),
+    NodeRawBookDiffs(NodeRawBookDiffsRows),
+    NodeFills(NodeFillsRow)
+}
+
+impl HyperliquidDirDataSingle {
+    pub fn kind(&self) -> HyperliquidDirKind {
+        match self {
+            HyperliquidDirDataSingle::NodeFills(_) => HyperliquidDirKind::NodeFills,
+            HyperliquidDirDataSingle::NodeOrderStatuses(_) => HyperliquidDirKind::NodeOrderStatuses,
+            HyperliquidDirDataSingle::NodeRawBookDiffs(_) => HyperliquidDirKind::NodeRawBookDiffs
+        }
     }
 }
