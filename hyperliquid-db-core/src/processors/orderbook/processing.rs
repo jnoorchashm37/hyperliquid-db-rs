@@ -35,6 +35,7 @@ impl ProcessedOrderBookData {
     }
 }
 
+//
 #[derive(Clone)]
 pub struct CachedBatch<T> {
     pub block_number:  u64,
