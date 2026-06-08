@@ -37,8 +37,7 @@ const FETCH_SNAPSHOT_SLEEP_TIME_SEC: u64 = 5;
 // hold finalization back until both streams advance this many blocks past a
 // target block. The reference order_book_server applies each matched block
 // immediately; a large holdback (previously 64 blocks, ~seconds at HL block
-// rates) was the dominant source of derived L2 gaps. Keep the default small and
-// allow overriding via env for tuning.
+// rates) was the dominant source of derived L2 gaps. Keep the default small.
 const STREAMING_FINALIZATION_BLOCK_DELAY: u64 = 2;
 
 #[derive(Default)]
