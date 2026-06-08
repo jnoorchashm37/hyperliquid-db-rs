@@ -427,7 +427,7 @@ impl L2BookTimeComparionMetrics {
         println!("\n\n\n\n\n\n\n\n----------- CACHE 1 -----------");
         print_fn(&cache1);
 
-        panic!();
+        // panic!();
 
         let mut cache0_l2_books_by_key = l2_books_by_comparison_key(&cache0.l2_books);
 
