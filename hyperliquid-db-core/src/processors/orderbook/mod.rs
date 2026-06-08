@@ -38,7 +38,6 @@ const FETCH_SNAPSHOT_SLEEP_TIME_SEC: u64 = 5;
 pub struct OrderBookDeriver {
     order_status_cache:          BatchQueue<L4OrderStatus>,
     book_diff_cache:             BatchQueue<L4BookDiff>,
-    streaming_block_cache:       StreamingBlockCache,
     order_books:                 BTreeMap<String, OrderBook>,
     state_snapshot:              StateSnapshotFetcher,
     pending_snapshot:            Option<StateSnapshot>,
@@ -47,7 +46,8 @@ pub struct OrderBookDeriver {
     snapshots_pending:           bool,
     ignore_spot:                 bool,
     logged_waiting_for_snapshot: bool,
-    outputs:                     OrderBookOutputs
+    outputs:                     OrderBookOutputs,
+    block_queue_cache:           BlockQueueCache
 }
 
 impl OrderBookDeriver {
@@ -72,11 +72,11 @@ impl OrderBookDeriver {
     }
 
     fn pending_order_status_batch_count(&self) -> usize {
-        self.order_status_cache.len() + self.streaming_block_cache.order_status_batch_count()
+        self.order_status_cache.len() + self.block_queue_cache.order_statuses.block_values.len()
     }
 
     fn pending_book_diff_batch_count(&self) -> usize {
-        self.book_diff_cache.len() + self.streaming_block_cache.book_diff_batch_count()
+        self.book_diff_cache.len() + self.block_queue_cache.raw_book_diffs.block_values.len()
     }
 
     pub fn is_ready(&self) -> bool {
@@ -147,8 +147,15 @@ impl OrderBookDeriver {
             return Ok(false);
         };
 
-        self.push_ready_streaming_batches_from_height(height)?;
-        if !self.has_cached_pair() {
+        // The apply queues are fed directly by `BlockQueueCache` (which already
+        // ordered, merged and empty-filled every block up to the watermark), so
+        // there is nothing to drain here. Wait until at least one block past the
+        // snapshot height is queued before consuming the snapshot.
+        let has_block_after_snapshot = self
+            .order_status_cache
+            .last_block
+            .is_some_and(|block| block > height);
+        if !self.has_cached_pair() || !has_block_after_snapshot {
             self.pending_snapshot = Some(StateSnapshot { height, snapshots });
             return Ok(false);
         }
@@ -217,7 +224,7 @@ impl OrderBookDeriver {
     fn reset_after_apply_error(&mut self) {
         self.order_status_cache = Default::default();
         self.book_diff_cache = Default::default();
-        self.streaming_block_cache = Default::default();
+        self.block_queue_cache = Default::default();
         self.order_books.clear();
         self.pending_snapshot = None;
         self.snapshot_height = None;
@@ -227,72 +234,41 @@ impl OrderBookDeriver {
         self.state_snapshot.fetch_new();
     }
 
-    fn receive_order_statuses(
-        &mut self,
-        rows: &[NodeOrderStatusesRows],
-        fs_data: &Arc<FsOutData>
-    ) -> eyre::Result<()> {
-        for row in rows {
-            let events = row
-                .events
-                .iter()
-                .cloned()
-                .map(TryInto::try_into)
-                .collect::<Result<Vec<_>, _>>()?;
-            self.streaming_block_cache.push_order_statuses(
-                row.block_number,
-                row.block_time_unix_ms()?,
-                events,
-                fs_data
-            );
-        }
+    /// Push one fully-formed, watermark-complete block into the apply queues.
+    ///
+    /// `BlockQueueCache` guarantees the block is below both stream watermarks,
+    /// so every row for it has already arrived (and multi-row blocks are
+    /// merged). A batch is pushed to BOTH queues for every block - even
+    /// when one side has no events - so the two queues stay perfectly
+    /// aligned by block number and `pop_cache` always finds a matching
+    /// pair. Blocks with no events in a stream are applied as no-ops rather
+    /// than blocking finalization.
+    fn enqueue_complete_block(&mut self, block: CompleteBlock) -> eyre::Result<()> {
+        let CompleteBlock { block_number, time, status_rows, diff_rows, pipeline_meta } = block;
 
-        self.push_ready_streaming_batches()?;
-        Ok(())
-    }
+        let order_statuses = status_rows
+            .iter()
+            .flat_map(|row| row.events.iter().cloned())
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<L4OrderStatus>, _>>()?;
+        let book_diffs = diff_rows
+            .iter()
+            .flat_map(|row| row.events.iter().cloned())
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<L4BookDiff>, _>>()?;
 
-    fn receive_book_diffs(
-        &mut self,
-        rows: &[NodeRawBookDiffsRows],
-        fs_data: &Arc<FsOutData>
-    ) -> eyre::Result<()> {
-        for row in rows {
-            self.streaming_block_cache.push_book_diffs(
-                row.block_number,
-                row.block_time_unix_ms()?,
-                row.events
-                    .iter()
-                    .cloned()
-                    .map(TryInto::try_into)
-                    .collect::<Result<Vec<_>, _>>()?,
-                fs_data
-            );
-        }
-
-        self.push_ready_streaming_batches()?;
-        Ok(())
-    }
-
-    fn push_ready_streaming_batches(&mut self) -> eyre::Result<()> {
-        let Some(snapshot_height) = self.snapshot_height else {
-            return Ok(());
-        };
-        self.push_ready_streaming_batches_from_height(snapshot_height)
-    }
-
-    fn push_ready_streaming_batches_from_height(
-        &mut self,
-        snapshot_height: u64
-    ) -> eyre::Result<()> {
-        let next_block = snapshot_height
-            .checked_add(1)
-            .ok_or_else(|| eyre::eyre!("l4 order book snapshot height overflow"))?;
-        self.streaming_block_cache.start_at(next_block);
-
-        for (order_statuses, book_diffs) in self.streaming_block_cache.pop_ready_batches() {
-            self.order_status_cache.push(order_statuses)?;
-            self.book_diff_cache.push(book_diffs)?;
-        }
+        self.order_status_cache.push(CachedBatch::from_meta(
+            block_number,
+            time,
+            order_statuses,
+            pipeline_meta.clone()
+        ))?;
+        self.book_diff_cache.push(CachedBatch::from_meta(
+            block_number,
+            time,
+            book_diffs,
+            pipeline_meta
+        ))?;
 
         Ok(())
     }
@@ -641,26 +617,22 @@ impl HyperliquidDataProcessorHandle for OrderBookDeriver {
 
         match &data.data {
             HyperliquidDirData::NodeOrderStatuses(rows) => {
-                self.receive_order_statuses(rows, &data.pipeline_meta)?;
-                println!(
-                    "[orderbook deriver] received {} order-status rows; \
-                     pending_order_status_batches={} pending_book_diff_batches={}",
-                    rows.len(),
-                    self.pending_order_status_batch_count(),
-                    self.pending_book_diff_batch_count()
-                );
+                self.block_queue_cache
+                    .new_order_statuses(rows.clone(), &data.pipeline_meta);
             }
             HyperliquidDirData::NodeRawBookDiffs(rows) => {
-                self.receive_book_diffs(rows, &data.pipeline_meta)?;
-                println!(
-                    "[orderbook deriver] received {} raw-book-diff rows; \
-                     pending_order_status_batches={} pending_book_diff_batches={}",
-                    rows.len(),
-                    self.pending_order_status_batch_count(),
-                    self.pending_book_diff_batch_count()
-                );
+                self.block_queue_cache
+                    .new_raw_book_diffs(rows.clone(), &data.pipeline_meta);
             }
             _ => return Ok(Vec::new())
+        }
+
+        // Drain every block both streams have now advanced past (so it is
+        // complete and fully merged) into the apply queues, empty-filling any
+        // block a stream carried no events for. This is the only path blocks
+        // take into the apply pipeline.
+        for block in self.block_queue_cache.try_process()? {
+            self.enqueue_complete_block(block)?;
         }
 
         if !self.try_initialize_from_snapshot()? {
@@ -675,6 +647,149 @@ impl HyperliquidDataProcessorHandle for OrderBookDeriver {
         }
 
         if out.is_empty() { Ok(Vec::new()) } else { Ok(out.into_hyperliquid_data()) }
+    }
+}
+
+/// A single block fully assembled from both streaming feeds, ready to apply.
+struct CompleteBlock {
+    block_number:  u64,
+    time:          u64,
+    status_rows:   Vec<NodeOrderStatusesRows>,
+    diff_rows:     Vec<NodeRawBookDiffsRows>,
+    pipeline_meta: ParsedDataPipelineMeta
+}
+
+/// Reassembles the two independent node streams (order statuses and raw book
+/// diffs) into ordered, complete, per-block batches.
+///
+/// The node writes each stream incrementally, and a block only appears in a
+/// stream if it carried events for that stream - so the streams are sparse and
+/// skewed relative to each other. A block is provably complete once BOTH
+/// streams have delivered a strictly later block: events are written in block
+/// order within a stream, so once a stream has moved on, any block it never
+/// wrote a row for is genuinely empty rather than still in flight.
+///
+/// `try_process` therefore finalizes every block below
+/// `min(order_status_watermark, raw_book_diff_watermark)`, empty-filling the
+/// gaps. This replaces the old `has_block(N) && has_block(N+1)` lockstep, which
+/// stalled forever the first time a block was empty in one stream.
+#[derive(Default)]
+pub struct BlockQueueCache {
+    current_block:   u64,
+    last_block_time: u64,
+    order_statuses:  SingleBlockQueueCache<NodeOrderStatusesRows>,
+    raw_book_diffs:  SingleBlockQueueCache<NodeRawBookDiffsRows>,
+    block_meta:      HashMap<u64, ParsedDataPipelineMeta>
+}
+
+impl BlockQueueCache {
+    fn new_order_statuses(&mut self, rows: Vec<NodeOrderStatusesRows>, fs_data: &FsOutData) {
+        for row in rows {
+            let block_number = row.block_number;
+            self.order_statuses
+                .block_values
+                .entry(block_number)
+                .or_default()
+                .push(row);
+            self.order_statuses.latest_block = self.order_statuses.latest_block.max(block_number);
+            self.block_meta
+                .entry(block_number)
+                .or_default()
+                .modify_with_fs_data(fs_data);
+        }
+    }
+
+    fn new_raw_book_diffs(&mut self, rows: Vec<NodeRawBookDiffsRows>, fs_data: &FsOutData) {
+        for row in rows {
+            let block_number = row.block_number;
+            self.raw_book_diffs
+                .block_values
+                .entry(block_number)
+                .or_default()
+                .push(row);
+            self.raw_book_diffs.latest_block = self.raw_book_diffs.latest_block.max(block_number);
+            self.block_meta
+                .entry(block_number)
+                .or_default()
+                .modify_with_fs_data(fs_data);
+        }
+    }
+
+    /// Finalize, in order, every block below the min watermark of the two
+    /// streams. A block absent from a stream is emitted with no events for that
+    /// side; a block absent from both inherits the previous block's time so it
+    /// never stamps `time = 0` (which would suppress snapshot/L2 emission).
+    fn try_process(&mut self) -> eyre::Result<Vec<CompleteBlock>> {
+        let prev_block = self.current_block;
+        self.current_block = self
+            .order_statuses
+            .latest_block
+            .min(self.raw_book_diffs.latest_block);
+
+        // The first observation only establishes the baseline watermark (we
+        // cannot emit `[0, current)`); a stalled watermark means nothing new is
+        // complete yet.
+        if prev_block == 0 || self.current_block == prev_block {
+            return Ok(Vec::new());
+        }
+
+        let mut blocks = Vec::with_capacity((self.current_block - prev_block) as usize);
+        for block_number in prev_block..self.current_block {
+            let status_rows = self
+                .order_statuses
+                .block_values
+                .remove(&block_number)
+                .unwrap_or_default();
+            let diff_rows = self
+                .raw_book_diffs
+                .block_values
+                .remove(&block_number)
+                .unwrap_or_default();
+            let pipeline_meta = self.block_meta.remove(&block_number).unwrap_or_default();
+
+            let time = if let Some(row) = status_rows.first() {
+                row.block_time_unix_ms()?
+            } else if let Some(row) = diff_rows.first() {
+                row.block_time_unix_ms()?
+            } else {
+                self.last_block_time
+            };
+            self.last_block_time = time;
+
+            blocks.push(CompleteBlock {
+                block_number,
+                time,
+                status_rows,
+                diff_rows,
+                pipeline_meta
+            });
+        }
+
+        // Drop any stragglers still below the watermark (e.g. an initial
+        // multi-block batch observed before the baseline was set). Both streams
+        // have moved past them, so they will never complete.
+        let cutoff = self.current_block;
+        self.order_statuses
+            .block_values
+            .retain(|block_number, _| *block_number >= cutoff);
+        self.raw_book_diffs
+            .block_values
+            .retain(|block_number, _| *block_number >= cutoff);
+        self.block_meta
+            .retain(|block_number, _| *block_number >= cutoff);
+
+        Ok(blocks)
+    }
+}
+
+pub struct SingleBlockQueueCache<T> {
+    latest_block: u64,
+    block_values: HashMap<u64, Vec<T>>
+}
+
+impl<T> Default for SingleBlockQueueCache<T> {
+    fn default() -> Self {
+        Self { latest_block: 0, block_values: HashMap::new() }
     }
 }
 
@@ -1135,58 +1250,30 @@ mod tests {
     }
 
     #[test]
-    fn stops_at_missing_block_instead_of_synthesizing_empty() {
+    fn empty_fills_block_missing_from_both_streams() {
         let mut deriver = ready_deriver(1019927124);
 
-        // Blocks 1019927125 and 1019927127 arrive in both streams, but 1019927126
-        // never does. With lockstep replay the hole must halt finalization rather
-        // than synthesize an empty 1019927126 and march past the gap (which would
-        // drop any opens carried by blocks still in flight).
+        // Block 1019927125 carries an open in both streams. Block 1019927126 never
+        // arrives in either stream (it genuinely had no events). The old lockstep
+        // stalled forever on such a hole; the watermark cache empty-fills
+        // 1019927126 once both streams advance past it and keeps applying, so the
+        // open in 1019927125 still lands.
         deriver
             .handle_data(&HyperliquidDirDataWithMeta {
-                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
-                    1019927125
-                )]),
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![status_row()]),
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
             })
             .unwrap();
         deriver
             .handle_data(&HyperliquidDirDataWithMeta {
-                data:          HyperliquidDirData::NodeRawBookDiffs(vec![empty_diff_row(
-                    1019927125
-                )]),
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![diff_row()]),
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
             })
             .unwrap();
-        deriver
-            .handle_data(&HyperliquidDirDataWithMeta {
-                data:          HyperliquidDirData::NodeOrderStatuses(vec![status_row_for_block(
-                    1019927127
-                )]),
-                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
-            })
-            .unwrap();
-        deriver
-            .handle_data(&HyperliquidDirDataWithMeta {
-                data:          HyperliquidDirData::NodeRawBookDiffs(vec![diff_row_for_block(
-                    1019927127
-                )]),
-                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
-            })
-            .unwrap();
-
-        // Even with a successor for 1019927127 delivered, the missing 1019927126
-        // blocks the contiguous run, so the open in 1019927127 is never applied.
-        let out = flush_block(&mut deriver, 1019927127);
-        assert!(out.is_empty());
-        assert_eq!(deriver.order_count(), 0);
-
-        // Once 1019927126 arrives the run is contiguous and replay catches up
-        // through 1019927127.
         deriver
             .handle_data(&HyperliquidDirDataWithMeta {
                 data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
-                    1019927126
+                    1019927127
                 )]),
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
             })
@@ -1194,23 +1281,26 @@ mod tests {
         let out = deriver
             .handle_data(&HyperliquidDirDataWithMeta {
                 data:          HyperliquidDirData::NodeRawBookDiffs(vec![empty_diff_row(
-                    1019927126
+                    1019927127
                 )]),
                 pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
             })
             .unwrap();
 
+        // 1019927127 arriving in both streams pushes the watermark past
+        // 1019927126, so 1019927125 (open) and the empty-filled 1019927126 both
+        // finalize - the open is applied even though 1019927126 was never seen.
+        assert!(deriver.is_ready());
         assert_eq!(deriver.order_count(), 1);
         let HyperliquidData::L4Book(books) = &out[0] else { unreachable!() };
         let L4Book::Updates(update) = &books[0].data else { unreachable!() };
-        assert_eq!(update.height, 1019927127);
+        assert_eq!(update.height, 1019927125);
     }
 
     fn deriver_without_snapshot() -> OrderBookDeriver {
         OrderBookDeriver {
             order_status_cache:          Default::default(),
             book_diff_cache:             Default::default(),
-            streaming_block_cache:       Default::default(),
             order_books:                 Default::default(),
             state_snapshot:              StateSnapshotFetcher::empty(),
             pending_snapshot:            None,
@@ -1219,7 +1309,8 @@ mod tests {
             snapshots_pending:           false,
             ignore_spot:                 false,
             logged_waiting_for_snapshot: false,
-            outputs:                     Default::default()
+            outputs:                     Default::default(),
+            block_queue_cache:           Default::default()
         }
     }
 
@@ -1234,7 +1325,6 @@ mod tests {
         OrderBookDeriver {
             order_status_cache:          Default::default(),
             book_diff_cache:             Default::default(),
-            streaming_block_cache:       Default::default(),
             order_books:                 Default::default(),
             state_snapshot:              StateSnapshotFetcher::with_snapshot(StateSnapshot {
                 height,
@@ -1246,7 +1336,8 @@ mod tests {
             snapshots_pending:           false,
             ignore_spot:                 false,
             logged_waiting_for_snapshot: false,
-            outputs:                     Default::default()
+            outputs:                     Default::default(),
+            block_queue_cache:           Default::default()
         }
     }
 
@@ -1254,7 +1345,6 @@ mod tests {
         OrderBookDeriver {
             order_status_cache:          Default::default(),
             book_diff_cache:             Default::default(),
-            streaming_block_cache:       Default::default(),
             order_books:                 Default::default(),
             state_snapshot:              StateSnapshotFetcher::empty(),
             pending_snapshot:            None,
@@ -1263,7 +1353,8 @@ mod tests {
             snapshots_pending:           false,
             ignore_spot:                 false,
             logged_waiting_for_snapshot: false,
-            outputs:                     Default::default()
+            outputs:                     Default::default(),
+            block_queue_cache:           Default::default()
         }
     }
 
@@ -1320,18 +1411,6 @@ mod tests {
             }"#
         )
         .unwrap()
-    }
-
-    fn status_row_for_block(block_number: u64) -> NodeOrderStatusesRows {
-        let mut row = status_row();
-        row.block_number = block_number;
-        row
-    }
-
-    fn diff_row_for_block(block_number: u64) -> NodeRawBookDiffsRows {
-        let mut row = diff_row();
-        row.block_number = block_number;
-        row
     }
 
     fn empty_status_row(block_number: u64) -> NodeOrderStatusesRows {
