@@ -422,9 +422,9 @@ impl L2BookTimeComparionMetrics {
             }
         };
 
-        println!("----------- CACHE 0 -----------\n\n\n\n\n\n\n\n");
+        println!("\n\n\n\n\n\n\n\n----------- CACHE 0 -----------");
         print_fn(&cache0);
-        println!("----------- CACHE 1 -----------");
+        println!("\n\n\n\n\n\n\n\n----------- CACHE 1 -----------");
         print_fn(&cache1);
 
         panic!();
