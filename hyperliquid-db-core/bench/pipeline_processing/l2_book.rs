@@ -418,7 +418,7 @@ impl L2BookTimeComparionMetrics {
     fn compare_l2_book_caches(cache0: L2BookCache, cache1: L2BookCache) -> Self {
         let print_fn = |full_book: &L2BookCache| {
             for book in &full_book.l2_books {
-                println!("{:?}\n\n", book.l2_book.data)
+                println!("{}\n\n", book.l2_book.data.format_pretty());
             }
         };
 
