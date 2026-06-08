@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, VecDeque};
 
 use crate::{
     fs_handlers::types::FsOutData,
-    processors::orderbook::STREAMING_FINALIZATION_BLOCK_DELAY,
     types::{
         HyperliquidData, HyperliquidDataKind, HyperliquidDataWithMeta, L2Book, L4Book, L4BookDiff,
         L4OrderStatus, ParsedDataPipelineMeta
@@ -60,12 +59,9 @@ impl<T> CachedBatch<T> {
 
 #[derive(Default)]
 pub struct StreamingBlockCache {
-    pub order_statuses:            BTreeMap<u64, AccumulatedBatch<L4OrderStatus>>,
-    pub book_diffs:                BTreeMap<u64, AccumulatedBatch<L4BookDiff>>,
-    pub latest_order_status_block: Option<u64>,
-    pub latest_book_diff_block:    Option<u64>,
-    pub next_block_to_finalize:    Option<u64>,
-    pub last_finalized_time:       u64
+    pub order_statuses:         BTreeMap<u64, AccumulatedBatch<L4OrderStatus>>,
+    pub book_diffs:             BTreeMap<u64, AccumulatedBatch<L4BookDiff>>,
+    pub next_block_to_finalize: Option<u64>
 }
 
 impl StreamingBlockCache {
@@ -80,10 +76,6 @@ impl StreamingBlockCache {
             return;
         }
 
-        self.latest_order_status_block = Some(
-            self.latest_order_status_block
-                .map_or(block_number, |latest| latest.max(block_number))
-        );
         self.order_statuses
             .entry(block_number)
             .or_insert_with(|| AccumulatedBatch::new(time))
@@ -101,10 +93,6 @@ impl StreamingBlockCache {
             return;
         }
 
-        self.latest_book_diff_block = Some(
-            self.latest_book_diff_block
-                .map_or(block_number, |latest| latest.max(block_number))
-        );
         self.book_diffs
             .entry(block_number)
             .or_insert_with(|| AccumulatedBatch::new(time))
@@ -114,9 +102,6 @@ impl StreamingBlockCache {
     pub fn pop_ready_batches(
         &mut self
     ) -> Vec<(CachedBatch<L4OrderStatus>, CachedBatch<L4BookDiff>)> {
-        let Some(ready_upper_exclusive) = self.ready_upper_exclusive() else {
-            return Vec::new();
-        };
         let Some(mut block_number) = self
             .next_block_to_finalize
             .or_else(|| self.first_pending_block())
@@ -124,43 +109,52 @@ impl StreamingBlockCache {
             return Vec::new();
         };
 
+        // Finalize the longest contiguous run of blocks that BOTH streams have
+        // delivered, mirroring order_book_server's lockstep replay. A block is
+        // only finalized once its immediate successor has also arrived in both
+        // streams: that proves the block is complete (all of its possibly
+        // multi-row events have been merged) and lets us stop at the first
+        // not-yet-delivered block instead of synthesizing an empty one.
+        // Synthesizing empties for blocks still in flight dropped the opens they
+        // carried, which made later Remove/Update diffs reference orders that
+        // were never added to the book.
         let mut out = Vec::new();
-        while block_number < ready_upper_exclusive {
-            let order_statuses = self.order_statuses.remove(&block_number);
-            let book_diffs = self.book_diffs.remove(&block_number);
-            let time = order_statuses
-                .as_ref()
-                .map(|batch| batch.time)
-                .or_else(|| book_diffs.as_ref().map(|batch| batch.time))
-                .unwrap_or(self.last_finalized_time);
-            let order_status_meta = order_statuses
-                .as_ref()
-                .map(|batch| batch.pipeline_meta.clone())
-                .or_else(|| book_diffs.as_ref().map(|batch| batch.pipeline_meta.clone()))
-                .unwrap_or_default();
-            let book_diff_meta = book_diffs
-                .as_ref()
-                .map(|batch| batch.pipeline_meta.clone())
-                .or_else(|| {
-                    order_statuses
-                        .as_ref()
-                        .map(|batch| batch.pipeline_meta.clone())
-                })
-                .unwrap_or_default();
-            let order_status_events = order_statuses.map(|batch| batch.events).unwrap_or_default();
-            let book_diff_events = book_diffs.map(|batch| batch.events).unwrap_or_default();
+        while self.has_block(block_number) && self.has_block(block_number + 1) {
+            let order_statuses = self
+                .order_statuses
+                .remove(&block_number)
+                .expect("order statuses present per has_block");
+            let book_diffs = self
+                .book_diffs
+                .remove(&block_number)
+                .expect("book diffs present per has_block");
 
+            let time = order_statuses.time;
             out.push((
-                CachedBatch::from_meta(block_number, time, order_status_events, order_status_meta),
-                CachedBatch::from_meta(block_number, time, book_diff_events, book_diff_meta)
+                CachedBatch::from_meta(
+                    block_number,
+                    time,
+                    order_statuses.events,
+                    order_statuses.pipeline_meta
+                ),
+                CachedBatch::from_meta(
+                    block_number,
+                    time,
+                    book_diffs.events,
+                    book_diffs.pipeline_meta
+                )
             ));
 
-            self.last_finalized_time = time;
             block_number += 1;
         }
 
         self.next_block_to_finalize = Some(block_number);
         out
+    }
+
+    fn has_block(&self, block_number: u64) -> bool {
+        self.order_statuses.contains_key(&block_number)
+            && self.book_diffs.contains_key(&block_number)
     }
 
     pub fn start_at(&mut self, block_number: u64) {
@@ -185,14 +179,6 @@ impl StreamingBlockCache {
     pub fn is_finalized(&self, block_number: u64) -> bool {
         self.next_block_to_finalize
             .is_some_and(|next_block| block_number < next_block)
-    }
-
-    pub fn ready_upper_exclusive(&self) -> Option<u64> {
-        let lower_watermark = self
-            .latest_order_status_block?
-            .min(self.latest_book_diff_block?);
-
-        lower_watermark.checked_sub(STREAMING_FINALIZATION_BLOCK_DELAY.saturating_sub(1))
     }
 
     pub fn first_pending_block(&self) -> Option<u64> {

@@ -33,12 +33,6 @@ use crate::{
 // Multiply all sizes and prices by 10^MAX_DECIMALS for ease of computation.
 const PRICE_MULTIPLIER: f64 = 100_000_000.0;
 const FETCH_SNAPSHOT_SLEEP_TIME_SEC: u64 = 5;
-// Streaming rows for a block can arrive after later blocks are observed, so we
-// hold finalization back until both streams advance this many blocks past a
-// target block. The reference order_book_server applies each matched block
-// immediately; a large holdback (previously 64 blocks, ~seconds at HL block
-// rates) was the dominant source of derived L2 gaps. Keep the default small.
-const STREAMING_FINALIZATION_BLOCK_DELAY: u64 = 5;
 
 #[derive(Default)]
 pub struct OrderBookDeriver {
@@ -797,6 +791,16 @@ mod tests {
         assert!(first.is_empty());
         assert!(!deriver.is_ready());
 
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![empty_diff_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap();
+        assert!(!deriver.is_ready());
+
         let out = flush_block(&mut deriver, 1019927125)
             .into_iter()
             .next()
@@ -879,6 +883,16 @@ mod tests {
             .unwrap();
 
         assert!(first.is_empty());
+        assert!(!deriver.is_ready());
+
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![empty_diff_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap();
         assert!(!deriver.is_ready());
 
         let out = flush_block(&mut deriver, 1019927125);
@@ -1114,9 +1128,29 @@ mod tests {
     }
 
     #[test]
-    fn advances_across_empty_streaming_block_gaps() {
+    fn stops_at_missing_block_instead_of_synthesizing_empty() {
         let mut deriver = ready_deriver(1019927124);
 
+        // Blocks 1019927125 and 1019927127 arrive in both streams, but 1019927126
+        // never does. With lockstep replay the hole must halt finalization rather
+        // than synthesize an empty 1019927126 and march past the gap (which would
+        // drop any opens carried by blocks still in flight).
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![empty_diff_row(
+                    1019927125
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap();
         deriver
             .handle_data(&HyperliquidDirDataWithMeta {
                 data:          HyperliquidDirData::NodeOrderStatuses(vec![status_row_for_block(
@@ -1134,7 +1168,30 @@ mod tests {
             })
             .unwrap();
 
+        // Even with a successor for 1019927127 delivered, the missing 1019927126
+        // blocks the contiguous run, so the open in 1019927127 is never applied.
         let out = flush_block(&mut deriver, 1019927127);
+        assert!(out.is_empty());
+        assert_eq!(deriver.order_count(), 0);
+
+        // Once 1019927126 arrives the run is contiguous and replay catches up
+        // through 1019927127.
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
+                    1019927126
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+        let out = deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![empty_diff_row(
+                    1019927126
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap();
 
         assert_eq!(deriver.order_count(), 1);
         let HyperliquidData::L4Book(books) = &out[0] else { unreachable!() };
@@ -1374,28 +1431,25 @@ mod tests {
     }
 
     fn flush_block(deriver: &mut OrderBookDeriver, block_number: u64) -> Vec<HyperliquidData> {
-        let mut out = Vec::new();
-
-        for offset in 1..=super::STREAMING_FINALIZATION_BLOCK_DELAY {
-            let next_block = block_number + offset;
-            deriver
-                .handle_data(&HyperliquidDirDataWithMeta {
-                    data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
-                        next_block
-                    )]),
-                    pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
-                })
-                .unwrap();
-            out = deriver
-                .handle_data(&HyperliquidDirDataWithMeta {
-                    data:          HyperliquidDirData::NodeRawBookDiffs(vec![empty_diff_row(
-                        next_block
-                    )]),
-                    pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
-                })
-                .unwrap();
-        }
-
-        out
+        // A block is finalized only once its successor has arrived in both
+        // streams (which proves the block is complete), so deliver an empty
+        // successor block to trigger finalization of `block_number` in tests.
+        let next_block = block_number + 1;
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeOrderStatuses(vec![empty_status_row(
+                    next_block
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeOrderStatuses)
+            })
+            .unwrap();
+        deriver
+            .handle_data(&HyperliquidDirDataWithMeta {
+                data:          HyperliquidDirData::NodeRawBookDiffs(vec![empty_diff_row(
+                    next_block
+                )]),
+                pipeline_meta: fs_data(HyperliquidDirKind::NodeRawBookDiffs)
+            })
+            .unwrap()
     }
 }
