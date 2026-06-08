@@ -416,6 +416,19 @@ impl PipelineStats {
 
 impl L2BookTimeComparionMetrics {
     fn compare_l2_book_caches(cache0: L2BookCache, cache1: L2BookCache) -> Self {
+        let print_fn = |full_book: &L2BookCache| {
+            for book in &full_book.l2_books {
+                println!("{:?}\n\n", book.l2_book.data)
+            }
+        };
+
+        println!("----------- CACHE 0 -----------\n\n\n\n\n\n\n\n");
+        print_fn(&cache0);
+        println!("----------- CACHE 1 -----------");
+        print_fn(&cache1);
+
+        panic!();
+
         let mut cache0_l2_books_by_key = l2_books_by_comparison_key(&cache0.l2_books);
 
         let mut similiar_l2_books = Vec::new();
