@@ -18,27 +18,26 @@ impl L2Book {
         &self.levels[1]
     }
 
-    pub fn format_pretty(&self) -> String {
-        let price_width = self
-            .bids()
-            .iter()
-            .chain(self.asks().iter())
+    pub fn format_pretty(&self, depth: Option<usize>) -> String {
+        let depth = depth.unwrap_or(usize::MAX);
+        let displayed_levels = || {
+            self.bids()
+                .iter()
+                .take(depth)
+                .chain(self.asks().iter().take(depth))
+        };
+
+        let price_width = displayed_levels()
             .map(|level| level.px.len())
             .max()
             .unwrap_or_default()
             .max("PRICE".len());
-        let size_width = self
-            .bids()
-            .iter()
-            .chain(self.asks().iter())
+        let size_width = displayed_levels()
             .map(|level| level.sz.len())
             .max()
             .unwrap_or_default()
             .max("SIZE".len());
-        let order_count_width = self
-            .bids()
-            .iter()
-            .chain(self.asks().iter())
+        let order_count_width = displayed_levels()
             .map(|level| level.n.to_string().len())
             .max()
             .unwrap_or_default()
@@ -65,7 +64,7 @@ impl L2Book {
         );
         let _ = writeln!(pretty, "{separator}");
 
-        for ask in self.asks().iter().rev() {
+        for ask in self.asks().iter().take(depth).rev() {
             let _ = writeln!(
                 pretty,
                 "{:<side_width$} | {:>price_width$} | {:>size_width$} | {:>order_count_width$}",
@@ -79,7 +78,7 @@ impl L2Book {
 
         let _ = writeln!(pretty, "{separator}");
 
-        for bid in self.bids() {
+        for bid in self.bids().iter().take(depth) {
             let _ = writeln!(
                 pretty,
                 "{:<side_width$} | {:>price_width$} | {:>size_width$} | {:>order_count_width$}",
@@ -99,9 +98,8 @@ impl L2Book {
 mod tests {
     use super::{L2Book, L2BookLevel};
 
-    #[test]
-    fn formats_orderbook_with_aligned_columns() {
-        let book = L2Book {
+    fn sample_book() -> L2Book {
+        L2Book {
             coin:   "BTC".to_string(),
             levels: [
                 vec![
@@ -114,10 +112,13 @@ mod tests {
                 ]
             ],
             time:   1_780_394_399_398
-        };
+        }
+    }
 
+    #[test]
+    fn formats_orderbook_with_aligned_columns() {
         assert_eq!(
-            book.format_pretty(),
+            sample_book().format_pretty(None),
             concat!(
                 "BTC L2 book @ 1780394399398\n",
                 "SIDE |  PRICE |   SIZE | ORDERS\n",
@@ -127,6 +128,21 @@ mod tests {
                 "-----+--------+--------+-------\n",
                 "BID  |  100.5 |      2 |      1\n",
                 "BID  |  99.75 | 12.345 |     20\n",
+            )
+        );
+    }
+
+    #[test]
+    fn formats_orderbook_with_depth_limit() {
+        assert_eq!(
+            sample_book().format_pretty(Some(1)),
+            concat!(
+                "BTC L2 book @ 1780394399398\n",
+                "SIDE | PRICE | SIZE | ORDERS\n",
+                "-----+-------+------+-------\n",
+                "ASK  |   101 |  3.4 |      2\n",
+                "-----+-------+------+-------\n",
+                "BID  | 100.5 |    2 |      1\n",
             )
         );
     }
