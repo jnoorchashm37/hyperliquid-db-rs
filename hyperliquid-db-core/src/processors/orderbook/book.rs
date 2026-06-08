@@ -64,10 +64,13 @@ impl OrderBook {
     }
 
     pub fn modify_sz(&mut self, oid: u64, sz: Sz) -> bool {
-        if !sz.is_positive() {
-            return self.cancel_order(oid);
-        }
-
+        // Mirror order_book_server: an `Update` only ever rewrites the resting
+        // size in place. It must NOT remove the order when the new size is 0 -
+        // Hyperliquid still emits an explicit `Remove` for that order later, and
+        // deleting it here would make that `Remove` (or a follow-up `Update`)
+        // fail with "unable to find order on the book", which aborts the whole
+        // post-snapshot replay. Orders only leave the book via `cancel_order`
+        // (a `Remove` diff) or by being fully matched in `add_order`.
         let Some((side, px)) = self.oid_to_side_px.get(&oid).copied() else {
             return false;
         };

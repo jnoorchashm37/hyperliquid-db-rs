@@ -1011,7 +1011,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_size_update_removes_order_from_l2_book() {
+    fn zero_size_update_keeps_order_on_book_with_zero_size() {
         let mut snapshots = HashMap::new();
         snapshots.insert(
             Coin::new("JTO"),
@@ -1050,7 +1050,14 @@ mod tests {
         assert_eq!(books.len(), 1);
         assert_eq!(books[0].data.coin, "JTO");
         assert!(books[0].data.bids().is_empty());
-        assert!(books[0].data.asks().is_empty());
+
+        // The order stays on the book at zero size (mirroring order_book_server);
+        // it is only removed by an explicit `Remove` diff or by being matched.
+        let asks = books[0].data.asks();
+        assert_eq!(asks.len(), 1);
+        assert_eq!(asks[0].px, "0.65313");
+        assert_eq!(asks[0].sz, "0");
+        assert_eq!(asks[0].n, 1);
     }
 
     fn request_all_orderbook_outputs(deriver: &mut OrderBookDeriver) {
