@@ -50,7 +50,9 @@ fn recursive_files(
             recursive_files(&path, max_age, min_size_mb, files)?;
         } else if path.is_file() {
             let file_with_meta = FileWithMeta::new(&path)?;
-            if file_with_meta.size_mb >= min_size_mb && file_with_meta.last_touched >= max_age {
+            if file_with_meta.size_mb >= min_size_mb
+                && file_with_meta.last_touched.timestamp() <= max_age.timestamp()
+            {
                 files.push(file_with_meta);
             }
         }
