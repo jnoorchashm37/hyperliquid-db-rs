@@ -12,7 +12,7 @@ pub fn run() -> eyre::Result<()> {
 
     let hl_data_dir = std::env::var("HL_DATA_DIR").unwrap_or_else(|_| DEFAULT_DATA_DIR.to_string());
 
-    clean_hyperliquid_fs_data(Path::new(&hl_data_dir).to_path_buf(), 0, 0)?;
+    clean_hyperliquid_fs_data(Path::new(&hl_data_dir).to_path_buf(), 24, 1000)?;
 
     Ok(())
 }

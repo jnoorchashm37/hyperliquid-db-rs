@@ -1,16 +1,19 @@
 use std::{os::unix::fs::MetadataExt, path::PathBuf, time::UNIX_EPOCH};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 
 const BYTES_TO_MB: u64 = 1024 * 1024;
 
 pub fn clean_hyperliquid_fs_data(
     hl_data_dir: PathBuf,
     max_age_hours: usize,
-    max_size_mb: usize
+    min_size_mb: u64
 ) -> eyre::Result<()> {
     let mut files = Vec::new();
-    recursive_files(&hl_data_dir, &mut files)?;
+    let max_age = Utc::now()
+        .checked_sub_signed(TimeDelta::hours(max_age_hours as i64))
+        .unwrap();
+    recursive_files(&hl_data_dir, max_age, min_size_mb, &mut files)?;
 
     files.sort_by_key(|file_with_meta| -1 * file_with_meta.size_mb as i64);
 
@@ -26,7 +29,12 @@ pub fn clean_hyperliquid_fs_data(
     Ok(())
 }
 
-fn recursive_files(dir_path: &PathBuf, files: &mut Vec<FileWithMeta>) -> eyre::Result<()> {
+fn recursive_files(
+    dir_path: &PathBuf,
+    max_age: DateTime<Utc>,
+    min_size_mb: u64,
+    files: &mut Vec<FileWithMeta>
+) -> eyre::Result<()> {
     if !dir_path.exists() {
         return Err(eyre::eyre!("path does not exist: {}", dir_path.display()));
     }
@@ -39,9 +47,12 @@ fn recursive_files(dir_path: &PathBuf, files: &mut Vec<FileWithMeta>) -> eyre::R
         let path = entry?.path();
 
         if path.is_dir() {
-            recursive_files(&path, files)?;
+            recursive_files(&path, max_age, min_size_mb, files)?;
         } else if path.is_file() {
-            files.push(FileWithMeta::new(&path)?);
+            let file_with_meta = FileWithMeta::new(&path)?;
+            if file_with_meta.size_mb >= min_size_mb && file_with_meta.last_touched >= max_age {
+                files.push(file_with_meta);
+            }
         }
     }
 
