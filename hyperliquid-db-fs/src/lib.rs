@@ -12,13 +12,13 @@ pub fn clean_hyperliquid_fs_data(
     let mut files = Vec::new();
     recursive_files(&hl_data_dir, &mut files)?;
 
-    files.sort_by_key(|file_with_meta| -1 * file_with_meta.last_touched.timestamp());
+    files.sort_by_key(|file_with_meta| -1 * file_with_meta.size_gb as i64);
 
     for file in files {
         tracing::info!(
             "({} GB) {}  -  {}",
-            file.path.display(),
             file.size_gb,
+            file.path.display(),
             file.last_touched.to_rfc2822()
         );
     }
