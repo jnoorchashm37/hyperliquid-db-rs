@@ -5,26 +5,25 @@ use chrono::{DateTime, TimeDelta, Utc};
 const BYTES_TO_MB: u64 = 1024 * 1024;
 
 pub fn clean_hyperliquid_fs_data(
-    hl_data_dir: PathBuf,
+    hl_data_dir: &PathBuf,
     max_age_hours: usize,
     min_size_mb: u64
 ) -> eyre::Result<()> {
+    tracing::info!(data_dir=?hl_data_dir.display(), max_age_hours,min_size_mb, "cleaning hyperliquid filesystem");
     let mut files = Vec::new();
     let max_age = Utc::now()
         .checked_sub_signed(TimeDelta::hours(max_age_hours as i64))
         .unwrap();
-    recursive_files(&hl_data_dir, max_age, min_size_mb, &mut files)?;
+    recursive_files(hl_data_dir, max_age, min_size_mb, &mut files)?;
 
     files.sort_by_key(|file_with_meta| -1 * file_with_meta.size_mb as i64);
 
-    for file in files {
-        tracing::info!(
-            "({} MB) {}  -  {}",
-            file.size_mb,
-            file.path.display(),
-            file.last_touched.to_rfc2822()
-        );
+    for file in &files {
+        tracing::debug!(path=?file.path.display(),size_mb=file.size_mb,last_touched=?file.last_touched.to_rfc2822(), "deleting file");
+        std::fs::remove_file(&file.path)?;
     }
+
+    tracing::info!(data_dir=?hl_data_dir.display(), max_age_hours,min_size_mb, "successfully removed {} files", files.len());
 
     Ok(())
 }
