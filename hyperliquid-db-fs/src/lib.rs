@@ -20,6 +20,20 @@ fn recursive_files(dir_path: &PathBuf, files: &mut Vec<FileWithMeta>) -> eyre::R
         return Err(eyre::eyre!("path does not exist: {}", dir_path.display()));
     }
 
+    if !dir_path.is_dir() {
+        return Err(eyre::eyre!("path is not a directory: {}", dir_path.display()));
+    }
+
+    for entry in std::fs::read_dir(dir_path)? {
+        let path = entry?.path();
+
+        if path.is_dir() {
+            recursive_files(&path, files)?;
+        } else if path.is_file() {
+            files.push(FileWithMeta::new(&path)?);
+        }
+    }
+
     Ok(())
 }
 
