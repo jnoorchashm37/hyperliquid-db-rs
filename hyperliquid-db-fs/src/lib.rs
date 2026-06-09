@@ -1,8 +1,14 @@
-use std::{path::PathBuf, time::UNIX_EPOCH};
+use std::{os::unix::fs::MetadataExt, path::PathBuf, time::UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
 
-pub fn clean_hyperliquid_fs_data(hl_data_dir: PathBuf, max_age_hours: usize) -> eyre::Result<()> {
+const BYTES_TO_GB: u64 = 1024 * 1024 * 1024;
+
+pub fn clean_hyperliquid_fs_data(
+    hl_data_dir: PathBuf,
+    max_age_hours: usize,
+    max_size_gb: usize
+) -> eyre::Result<()> {
     let mut files = Vec::new();
     recursive_files(&hl_data_dir, &mut files)?;
 
@@ -39,7 +45,8 @@ fn recursive_files(dir_path: &PathBuf, files: &mut Vec<FileWithMeta>) -> eyre::R
 
 struct FileWithMeta {
     path:         PathBuf,
-    last_touched: DateTime<Utc>
+    last_touched: DateTime<Utc>,
+    size_gb:      u64
 }
 
 impl FileWithMeta {
@@ -56,11 +63,13 @@ impl FileWithMeta {
 
         let modified = meta.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
         let accessed = meta.accessed()?.duration_since(UNIX_EPOCH)?.as_secs();
+        let size_gb = meta.size() / BYTES_TO_GB;
 
         Ok(Self {
-            path:         path.clone(),
+            path: path.clone(),
             last_touched: DateTime::from_timestamp(std::cmp::min(accessed, modified) as i64, 0)
-                .unwrap()
+                .unwrap(),
+            size_gb
         })
     }
 }
