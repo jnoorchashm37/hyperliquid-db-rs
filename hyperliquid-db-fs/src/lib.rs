@@ -23,7 +23,11 @@ pub fn clean_hyperliquid_fs_data(
         std::fs::remove_file(&file.path)?;
     }
 
-    tracing::info!(data_dir=?hl_data_dir.display(), max_age_hours,min_size_mb, "successfully removed {} files", files.len());
+    if files.len() == 0 {
+        tracing::warn!(data_dir=?hl_data_dir.display(), max_age_hours,min_size_mb, "no files to remove");
+    } else {
+        tracing::info!(data_dir=?hl_data_dir.display(), max_age_hours,min_size_mb, "successfully removed {} files", files.len());
+    }
 
     Ok(())
 }
