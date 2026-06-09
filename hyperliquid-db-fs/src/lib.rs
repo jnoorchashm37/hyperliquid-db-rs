@@ -9,7 +9,7 @@ pub fn clean_hyperliquid_fs_data(hl_data_dir: PathBuf, max_age_hours: usize) -> 
     files.sort_by_key(|file_with_meta| -1 * file_with_meta.last_touched.timestamp());
 
     for file in files {
-        println!("{}  -  {}", file.path.display(), file.last_touched.to_rfc2822());
+        tracing::info!("{}  -  {}", file.path.display(), file.last_touched.to_rfc2822());
     }
 
     Ok(())
