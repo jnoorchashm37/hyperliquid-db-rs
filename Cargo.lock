@@ -715,12 +715,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyperliquid-db-fs"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "eyre",
+ "hyperliquid-db-core",
+ "inotify",
+ "itertools",
+ "notify",
+ "serde",
+ "serde_json",
+ "strum",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "tungstenite",
+]
+
+[[package]]
 name = "hyperliquid-db-server"
 version = "0.1.0"
 dependencies = [
  "axum",
  "eyre",
  "hyperliquid-db-core",
+ "hyperliquid-db-fs",
  "inotify",
  "itertools",
  "notify",

@@ -1,5 +1,5 @@
 [package]
-name = "hyperliquid-db-server"
+name = "hyperliquid-db-fs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,6 @@ exclude.workspace = true
 
 [dependencies]
 hyperliquid-db-core.workspace = true
-hyperliquid-db-fs.workspace = true
 axum.workspace = true
 tokio.workspace = true
 serde.workspace = true
