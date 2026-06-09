@@ -15,7 +15,12 @@ pub fn clean_hyperliquid_fs_data(
     files.sort_by_key(|file_with_meta| -1 * file_with_meta.last_touched.timestamp());
 
     for file in files {
-        tracing::info!("{}  -  {}", file.path.display(), file.last_touched.to_rfc2822());
+        tracing::info!(
+            "({} GB) {}  -  {}",
+            file.path.display(),
+            file.size_gb,
+            file.last_touched.to_rfc2822()
+        );
     }
 
     Ok(())
