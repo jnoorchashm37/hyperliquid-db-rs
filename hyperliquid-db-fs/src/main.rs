@@ -1,5 +1,5 @@
-mod bin;
+mod bin_rt;
 
 fn main() -> eyre::Result<()> {
-    bin::run()
+    crate::bin_rt::run()
 }
