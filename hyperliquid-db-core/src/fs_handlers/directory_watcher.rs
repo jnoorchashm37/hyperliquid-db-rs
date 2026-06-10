@@ -32,15 +32,20 @@ impl DirectoryWatcher {
         out_tx: mpsc::Sender<eyre::Result<HyperliquidDirDataWithMeta>>
     ) -> eyre::Result<()> {
         let directory = ActiveDirectory::new(name)?;
-        println!(
-            "[directory watcher] initializing {name:?} path={:?} existing_files={}",
-            directory.dir_path,
-            directory.file_states.len()
+        tracing::info!(
+            name = ?name,
+            path = ?directory.dir_path,
+            existing_files = directory.file_states.len(),
+            "initializing directory watcher"
         );
         let notifier = Inotify::init()?;
         let mut watcher = Self { name, directory, notifier, watch_dirs: HashMap::new(), out_tx };
         watcher.add_directory_watches_recursive(&watcher.directory.dir_path.clone())?;
-        println!("[directory watcher] watching {name:?} directories={}", watcher.watch_dirs.len());
+        tracing::info!(
+            name = ?name,
+            directories = watcher.watch_dirs.len(),
+            "watching directories"
+        );
         watcher.run();
 
         Ok(())
@@ -72,12 +77,24 @@ impl DirectoryWatcher {
         let mut parser = P::default();
 
         let mut event_buf = [0_u8; 16 * 1024];
-        println!("[directory watcher] {name:?} waiting for filesystem events", name = self.name);
+        tracing::info!(name = ?self.name, "waiting for filesystem events");
 
         loop {
             let events = self.notifier.read_events_blocking(&mut event_buf)?;
             let notification_batch_received_at_ns = unix_timestamp().as_nanos();
+            tracing::trace!(
+                name = ?self.name,
+                notification_batch_received_at_ns,
+                "received filesystem event batch"
+            );
             for event in events {
+                tracing::trace!(
+                    name = ?self.name,
+                    mask = ?event.mask,
+                    watch_descriptor = ?event.wd,
+                    event_name = ?event.name,
+                    "processing filesystem event"
+                );
                 if event.mask.contains(EventMask::Q_OVERFLOW) {
                     // Production code: full rescan here.
                     return Err(eyre::eyre!(
@@ -86,6 +103,11 @@ impl DirectoryWatcher {
                 }
                 if event.mask.contains(EventMask::IGNORED) {
                     self.watch_dirs.remove(&event.wd);
+                    tracing::trace!(
+                        name = ?self.name,
+                        watch_descriptor = ?event.wd,
+                        "removed ignored watch descriptor"
+                    );
                     continue;
                 }
 
@@ -97,6 +119,11 @@ impl DirectoryWatcher {
                             None => dir_path.clone()
                         })
                 else {
+                    tracing::trace!(
+                        name = ?self.name,
+                        watch_descriptor = ?event.wd,
+                        "skipping event for unknown watch descriptor"
+                    );
                     continue;
                 };
 
@@ -104,6 +131,7 @@ impl DirectoryWatcher {
                     if event.mask.contains(EventMask::CREATE)
                         || event.mask.contains(EventMask::MOVED_TO)
                     {
+                        tracing::debug!(name = ?self.name, path = ?path, "watching new directory");
                         self.add_directory_watches_recursive(&path)?;
                         self.drain_new_files_recursive(
                             &mut parser,
@@ -126,6 +154,7 @@ impl DirectoryWatcher {
 
         let wd = self.notifier.watches().add(dir_path, Self::watch_mask())?;
         self.watch_dirs.insert(wd, dir_path.to_path_buf());
+        tracing::trace!(name = ?self.name, path = ?dir_path, "added directory watch");
 
         for entry in fs::read_dir(dir_path)? {
             let entry = entry?;
@@ -160,6 +189,8 @@ impl DirectoryWatcher {
             return Ok(());
         }
 
+        tracing::trace!(name = ?self.name, path = ?dir_path, "draining new files recursively");
+
         for entry in fs::read_dir(dir_path)? {
             let entry = entry?;
             let path = entry.path();
@@ -185,13 +216,16 @@ impl DirectoryWatcher {
         P: HyperliquidDataParser,
         HyperliquidDirData: From<Vec<P::ParsedType>>
     {
+        tracing::trace!(name = ?self.name, path = ?path, "draining file");
         let drain_file_started_at_ns = unix_timestamp().as_nanos();
         if !path.is_file() {
+            tracing::trace!(name = ?self.name, path = ?path, "skipping non-file path");
             return Ok(());
         }
 
         let path = path.to_path_buf();
         if !self.directory.file_states.contains_key(&path) {
+            tracing::debug!(name = ?self.name, path = ?path, "tracking new file");
             self.directory
                 .file_states
                 .insert(path.clone(), FileTailState::new(&path, false)?);
@@ -217,15 +251,32 @@ impl DirectoryWatcher {
 
             if !chunks.is_empty() {
                 let total_bytes: usize = chunks.iter().map(|chunk| chunk.chunk_len).sum();
-                println!(
-                    "[directory watcher] {name:?} drained {} chunks / {total_bytes} bytes from \
-                     {path}",
-                    chunks.len()
+                tracing::debug!(
+                    name = ?name,
+                    path = %path,
+                    chunks = chunks.len(),
+                    total_bytes,
+                    "drained new file bytes"
                 );
+            } else {
+                tracing::trace!(name = ?name, path = %path, "no new file bytes drained");
             }
 
             for chunk in chunks {
                 let channel_send_started_at_ns = unix_timestamp().as_nanos();
+                tracing::trace!(
+                    name = ?name,
+                    path = %path,
+                    chunk_len = chunk.chunk_len,
+                    notification_batch_received_at_ns,
+                    drain_file_started_at_ns,
+                    drain_new_bytes_started_at_ns,
+                    file_bytes_read_at_ns = chunk.file_bytes_read_at_ns,
+                    drain_new_bytes_finished_at_ns,
+                    drain_file_finished_at_ns,
+                    channel_send_started_at_ns,
+                    "parsing filesystem chunk"
+                );
                 let raw_data = FsOutData {
                     name,
                     bytes: chunk.bytes,
