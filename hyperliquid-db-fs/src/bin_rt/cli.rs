@@ -11,7 +11,7 @@ const DEFAULT_MIN_SIZE_MB: u64 = 1000;
 #[derive(Debug, Parser)]
 #[command(name = "hyperliquid-db-fs")]
 pub struct HyperliquidDataFsCli {
-    #[arg(short, long = "data-dir", default_value = DEFAULT_DATA_DIR)]
+    #[arg(short, default_value = DEFAULT_DATA_DIR)]
     pub data_dir: PathBuf,
 
     /// only considers files last touched before `now - max_age_hours`
