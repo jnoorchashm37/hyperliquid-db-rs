@@ -18,7 +18,7 @@ pub struct HyperliquidDataRpcCli {
     #[arg(default_value = DEFAULT_RPC_ADDR)]
     pub rpc_addr: SocketAddr,
 
-    #[arg(long = "data-kind", value_delimiter = ',', default_value = "[]")]
+    #[arg(long = "data-kind", value_delimiter = ',')]
     pub data_kinds: Vec<CliDataKind>,
 
     #[arg(default_value_t = true)]
