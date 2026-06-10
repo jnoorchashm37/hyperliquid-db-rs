@@ -1,8 +1,9 @@
 pub mod builder;
+pub(crate) mod cli;
 mod ws_manager;
 use std::path::Path;
 
-use hyperliquid_db_fs::clean_hyperliquid_fs_data;
+use hyperliquid_db_fs::run_hyperliquid_fs_cleaner;
 pub use ws_manager::WsHandler;
 mod data_client;
 pub mod play_bin;
@@ -61,7 +62,9 @@ fn run_file_cleaner() -> eyre::Result<()> {
 
     std::thread::spawn(move || {
         loop {
-            if let Err(e) = clean_hyperliquid_fs_data(&hl_data_path, max_age_hours, min_size_mb) {
+            if let Err(e) =
+                run_hyperliquid_fs_cleaner(&hl_data_path, max_age_hours, min_size_mb, None)
+            {
                 tracing::error!(?e, "error cleaning filesystem - retrying in 1 minute");
                 std::thread::sleep(std::time::Duration::from_mins(1));
             } else {

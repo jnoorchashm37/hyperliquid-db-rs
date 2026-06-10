@@ -16,3 +16,4 @@ serde_json.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+clap.workspace = true
