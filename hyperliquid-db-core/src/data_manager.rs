@@ -22,10 +22,7 @@ pub struct HyperliquidDataManager {
 impl HyperliquidDataManager {
     pub fn spawn(
         data_kinds: &[HyperliquidDataKind]
-    ) -> eyre::Result<(
-        broadcast::Sender<Arc<eyre::Result<HyperliquidData>>>,
-        broadcast::Receiver<Arc<eyre::Result<HyperliquidData>>>
-    )> {
+    ) -> eyre::Result<broadcast::Sender<Arc<eyre::Result<HyperliquidData>>>> {
         tracing::info!("initializing data manager");
 
         let kind_map = data_kinds
@@ -62,11 +59,11 @@ impl HyperliquidDataManager {
 
         tracing::debug!("spawned data manager");
 
-        let (parsed_data_tx, parsed_data_rx) = broadcast::channel(10000);
+        let parsed_data_tx = broadcast::channel(10000).0;
         let this = Self { raw_data_rx, parsed_data_tx: parsed_data_tx.clone(), processors };
         this.run();
 
-        Ok((parsed_data_tx, parsed_data_rx))
+        Ok(parsed_data_tx)
     }
 
     fn run(mut self) {
@@ -93,12 +90,11 @@ impl HyperliquidDataManager {
     fn send_data(&mut self, data: HyperliquidDirDataWithMeta) -> eyre::Result<()> {
         self.processors.iter_mut().try_for_each(|processor| {
             match processor.handle_data(&data) {
-                Ok(results) => results.into_iter().try_for_each(|processed_data| {
-                    self.parsed_data_tx.send(Arc::new(Ok(processed_data)))?;
-                    eyre::Ok(())
-                })?,
+                Ok(results) => results.into_iter().for_each(|processed_data| {
+                    let _ = self.parsed_data_tx.send(Arc::new(Ok(processed_data)));
+                }),
                 Err(error) => {
-                    self.parsed_data_tx.send(Arc::new(Err(error)))?;
+                    let _ = self.parsed_data_tx.send(Arc::new(Err(error)));
                 }
             }
 

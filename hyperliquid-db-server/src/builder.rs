@@ -13,7 +13,7 @@ impl HyperliquidWebsocketBuilder {
     }
 
     pub fn build(self) -> eyre::Result<Router> {
-        let (data_tx, _data_rx) = HyperliquidDataManager::spawn(&self.data_kinds)?;
+        let data_tx = HyperliquidDataManager::spawn(&self.data_kinds)?;
 
         let mut app = Router::new();
 
