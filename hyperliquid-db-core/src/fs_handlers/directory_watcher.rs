@@ -127,6 +127,17 @@ impl DirectoryWatcher {
                     continue;
                 };
 
+                if event.mask.contains(EventMask::DELETE)
+                    || event.mask.contains(EventMask::MOVED_FROM)
+                {
+                    if event.mask.contains(EventMask::ISDIR) {
+                        self.remove_directory_file_states(&path);
+                    } else {
+                        self.remove_file_state(&path);
+                    }
+                    continue;
+                }
+
                 if event.mask.contains(EventMask::ISDIR) {
                     if event.mask.contains(EventMask::CREATE)
                         || event.mask.contains(EventMask::MOVED_TO)
@@ -171,8 +182,41 @@ impl DirectoryWatcher {
             | WatchMask::MODIFY
             | WatchMask::CLOSE_WRITE
             | WatchMask::MOVED_TO
+            | WatchMask::MOVED_FROM
+            | WatchMask::DELETE
             | WatchMask::DELETE_SELF
             | WatchMask::MOVE_SELF
+    }
+
+    fn remove_file_state(&mut self, path: &Path) {
+        if self.directory.file_states.remove(path).is_some() {
+            tracing::debug!(name = ?self.name, path = ?path, "stopped tracking deleted file");
+        } else {
+            tracing::trace!(name = ?self.name, path = ?path, "deleted file was not tracked");
+        }
+    }
+
+    fn remove_directory_file_states(&mut self, dir_path: &Path) {
+        let tracked_files_before = self.directory.file_states.len();
+        self.directory
+            .file_states
+            .retain(|path, _| !path.starts_with(dir_path));
+        let removed_files = tracked_files_before - self.directory.file_states.len();
+
+        if removed_files > 0 {
+            tracing::debug!(
+                name = ?self.name,
+                path = ?dir_path,
+                removed_files,
+                "stopped tracking files under deleted directory"
+            );
+        } else {
+            tracing::trace!(
+                name = ?self.name,
+                path = ?dir_path,
+                "deleted directory had no tracked files"
+            );
+        }
     }
 
     fn drain_new_files_recursive<P>(
