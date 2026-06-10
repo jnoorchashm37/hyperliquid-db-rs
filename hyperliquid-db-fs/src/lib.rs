@@ -6,7 +6,13 @@ use crate::fs::clean_hyperliquid_fs_data;
 
 /// if `loop_sleep_interval_hrs` is None, no loop
 pub fn run_hyperliquid_fs_cleaner(config: HyperliquidDataFsConfig) -> eyre::Result<()> {
-    tracing::info!(data_dir=?config.hl_data_dir.display(), max_age_hours=config.max_age_hours, min_size_mb=config.min_size_mb, loop_config=?config.loop_config, "running hyperliquid filesystem cleaner");
+    tracing::info!(
+        data_dir=?config.hl_data_dir.display(),
+        max_age_hours=config.max_age_hours,
+        min_size_mb=config.min_size_mb,
+        loop_config=?config.loop_config,
+        "running hyperliquid filesystem cleaner"
+    );
 
     if let Some(loop_cfg) = config.loop_config {
         loop {
