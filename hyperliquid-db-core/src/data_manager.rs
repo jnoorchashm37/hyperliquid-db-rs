@@ -22,7 +22,10 @@ pub struct HyperliquidDataManager {
 impl HyperliquidDataManager {
     pub fn spawn(
         data_kinds: &[HyperliquidDataKind]
-    ) -> eyre::Result<broadcast::Sender<Arc<eyre::Result<HyperliquidData>>>> {
+    ) -> eyre::Result<(
+        broadcast::Sender<Arc<eyre::Result<HyperliquidData>>>,
+        broadcast::Receiver<Arc<eyre::Result<HyperliquidData>>>
+    )> {
         tracing::info!("initializing data manager");
 
         let kind_map = data_kinds
@@ -59,11 +62,11 @@ impl HyperliquidDataManager {
 
         tracing::debug!("spawned data manager");
 
-        let parsed_data_tx = broadcast::channel(10000).0;
+        let (parsed_data_tx, parsed_data_rx) = broadcast::channel(10000);
         let this = Self { raw_data_rx, parsed_data_tx: parsed_data_tx.clone(), processors };
         this.run();
 
-        Ok(parsed_data_tx)
+        Ok((parsed_data_tx, parsed_data_rx))
     }
 
     fn run(mut self) {

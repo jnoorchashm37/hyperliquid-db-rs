@@ -13,13 +13,13 @@ impl HyperliquidWebsocketBuilder {
     }
 
     pub fn build(self) -> eyre::Result<Router> {
-        let data_rx = HyperliquidDataManager::spawn(&self.data_kinds)?;
+        let (data_tx, _data_rx) = HyperliquidDataManager::spawn(&self.data_kinds)?;
 
         let mut app = Router::new();
 
         for data_kind in self.data_kinds {
             let name = channel_name(data_kind);
-            let ws_handler = WsHandler::new(name, data_kind, data_rx.clone());
+            let ws_handler = WsHandler::new(name, data_kind, data_tx.clone());
 
             app = app.route(
                 route_name(data_kind),
