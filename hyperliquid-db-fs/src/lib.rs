@@ -17,7 +17,7 @@ pub fn run_hyperliquid_fs_cleaner(config: HyperliquidDataFsConfig) -> eyre::Resu
             ) {
                 tracing::error!(?error, "error cleaning filesystem - retrying in 1 minute");
                 if !loop_cfg.infallible_loop {
-                    return Err(error)
+                    return Err(error);
                 }
                 std::thread::sleep(std::time::Duration::from_mins(1));
             } else {

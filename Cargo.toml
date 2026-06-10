@@ -1,5 +1,5 @@
 [workspace]
-members = ["hyperliquid-db-core", "hyperliquid-db-server"]
+members = ["hyperliquid-db-core", "hyperliquid-db-server", "hyperliquid-db-fs"]
 resolver = "2"
 
 [workspace.package]
