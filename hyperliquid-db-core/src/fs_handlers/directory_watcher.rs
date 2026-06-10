@@ -295,7 +295,7 @@ impl DirectoryWatcher {
 
             if !chunks.is_empty() {
                 let total_bytes: usize = chunks.iter().map(|chunk| chunk.chunk_len).sum();
-                tracing::debug!(
+                tracing::trace!(
                     name = ?name,
                     path = %path,
                     chunks = chunks.len(),
