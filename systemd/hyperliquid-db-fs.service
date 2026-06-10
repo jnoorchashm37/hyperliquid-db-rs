@@ -1,0 +1,15 @@
+[Unit]
+Description=hyperliquid-db-fs
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Restart=always
+RestartSec=10s
+Type=simple
+
+ExecStart=/root/hyperliquid-db-rs/target/maxperf/hyperliquid-db-fs -l 24
+  
+
+[Install]
+WantedBy=multi-user.target

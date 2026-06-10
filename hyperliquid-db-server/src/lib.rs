@@ -3,9 +3,10 @@ pub(crate) mod cli;
 mod ws_manager;
 
 use clap::Parser;
-use hyperliquid_db_fs::{HyperliquidDataFsConfig, run_hyperliquid_fs_cleaner};
+use hyperliquid_db_fs::run_hyperliquid_fs_cleaner;
 pub use ws_manager::WsHandler;
 mod data_client;
+#[cfg(feature = "example")]
 pub mod play_bin;
 pub mod route;
 pub mod types;
@@ -22,7 +23,10 @@ pub async fn run_server() -> eyre::Result<()> {
 
     if cli.clean_fs {
         tracing::info!("running hyperliquid file cleaner");
-        run_file_cleaner(cli.fs_cleaner_config());
+        let fs_cleaner_config = cli.fs_cleaner_config();
+        std::thread::spawn(move || {
+            run_hyperliquid_fs_cleaner(fs_cleaner_config).unwrap();
+        });
     }
 
     let app = HyperliquidWebsocketBuilder::new(cli.hyperliquid_data_kinds()).build()?;
@@ -32,10 +36,4 @@ pub async fn run_server() -> eyre::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
-}
-
-fn run_file_cleaner(config: HyperliquidDataFsConfig) {
-    std::thread::spawn(move || {
-        run_hyperliquid_fs_cleaner(config).unwrap();
-    });
 }

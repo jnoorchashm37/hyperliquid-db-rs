@@ -10,7 +10,7 @@ const DEFAULT_MAX_AGE_HOURS: usize = 24;
 const DEFAULT_MIN_SIZE_MB: u64 = 1000;
 const DEFAULT_FS_CLEAN_INTERVAL_HRS: u64 = 12;
 
-const DEFAULT_RPC_ADDR: &str = "127.0.0.1:3000";
+const DEFAULT_RPC_ADDR: &str = "127.0.0.1:3737";
 
 #[derive(Debug, Parser)]
 #[command(name = "hyperliquid-db-server", version)]
