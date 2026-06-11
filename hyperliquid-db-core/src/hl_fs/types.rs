@@ -43,12 +43,6 @@ impl HyperliquidDirData {
     }
 }
 
-impl From<Vec<NodeFillsRow>> for HyperliquidDirData {
-    fn from(value: Vec<NodeFillsRow>) -> Self {
-        Self::NodeFills(value)
-    }
-}
-
 #[derive(Clone, Copy, Hash, PartialEq, Eq, strum::EnumIter)]
 pub enum HyperliquidDirKind {
     NodeOrderStatuses,

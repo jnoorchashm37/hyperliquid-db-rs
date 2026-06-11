@@ -1,4 +1,4 @@
-use crate::hl_fs::{parsers::HyperliquidDataParser, schemas::NodeFillsRow};
+use crate::hl_fs::{HyperliquidDirData, parsers::HyperliquidDataParser, schemas::NodeFillsRow};
 
 #[derive(Default)]
 pub struct NodeFillsParser {
@@ -20,6 +20,12 @@ impl HyperliquidDataParser for NodeFillsParser {
 
     fn parse_raw_type(data: &[u8]) -> eyre::Result<Self::ParsedType> {
         Ok(serde_json::from_slice::<Self::ParsedType>(data)?)
+    }
+}
+
+impl From<Vec<NodeFillsRow>> for HyperliquidDirData {
+    fn from(value: Vec<NodeFillsRow>) -> Self {
+        Self::NodeFills(value)
     }
 }
 
