@@ -6,8 +6,8 @@ const BYTES_TO_MB: u64 = 1024 * 1024;
 
 pub fn clean_hyperliquid_fs_data(
     hl_data_dir: &PathBuf,
-    max_age_hours: usize,
-    min_size_mb: u64
+    max_age_hours: u64,
+    min_size_mb: Option<u64>
 ) -> eyre::Result<()> {
     tracing::info!(data_dir=?hl_data_dir.display(), max_age_hours,min_size_mb, "cleaning hyperliquid filesystem");
     let mut files = Vec::new();
@@ -35,7 +35,7 @@ pub fn clean_hyperliquid_fs_data(
 fn recursive_files(
     dir_path: &PathBuf,
     max_age: DateTime<Utc>,
-    min_size_mb: u64,
+    min_size_mb: Option<u64>,
     files: &mut Vec<FileWithMeta>
 ) -> eyre::Result<()> {
     if !dir_path.exists() {
@@ -53,9 +53,13 @@ fn recursive_files(
             recursive_files(&path, max_age, min_size_mb, files)?;
         } else if path.is_file() {
             let file_with_meta = FileWithMeta::new(&path)?;
-            if file_with_meta.size_mb >= min_size_mb
-                && file_with_meta.last_touched.timestamp() <= max_age.timestamp()
-            {
+            if file_with_meta.last_touched.timestamp() <= max_age.timestamp() {
+                if let Some(size) = min_size_mb {
+                    if file_with_meta.size_mb < size {
+                        continue;
+                    }
+                }
+
                 files.push(file_with_meta);
             }
         }

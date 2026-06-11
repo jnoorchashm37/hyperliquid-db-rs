@@ -5,8 +5,7 @@ use hyperliquid_db_fs::HyperliquidDataFsConfig;
 use tracing::Level;
 
 const DEFAULT_DATA_DIR: &str = "/root/hl/data";
-const DEFAULT_MAX_AGE_HOURS: usize = 24;
-const DEFAULT_MIN_SIZE_MB: u64 = 10;
+const DEFAULT_MAX_AGE_HOURS: u64 = 24;
 
 #[derive(Debug, Parser)]
 #[command(name = "hyperliquid-db-fs")]
@@ -15,12 +14,12 @@ pub struct HyperliquidDataFsCli {
     pub data_dir: PathBuf,
 
     /// only considers files last touched before `now - max_age_hours`
-    #[arg(short = 'a', long, default_value_t = DEFAULT_MAX_AGE_HOURS)]
-    pub max_age_hours: usize,
+    #[arg(short = 'a', long, default_value_t = DEFAULT_MAX_AGE_HOURS, value_parser = clap::value_parser!(u64).range(DEFAULT_MAX_AGE_HOURS..))]
+    pub max_age_hours: u64,
 
     /// only considers files above this size
-    #[arg(short = 's', long, default_value_t = DEFAULT_MIN_SIZE_MB)]
-    pub min_size_mb: u64,
+    #[arg(short = 's', long)]
+    pub min_size_mb: Option<u64>,
 
     #[arg(short = 'l', long)]
     pub loop_sleep_interval_hours: Option<u64>,

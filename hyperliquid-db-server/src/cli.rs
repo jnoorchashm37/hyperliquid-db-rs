@@ -6,8 +6,7 @@ use hyperliquid_db_fs::HyperliquidDataFsConfig;
 use tracing::Level;
 
 const DEFAULT_DATA_DIR: &str = "/root/hl/data";
-const DEFAULT_MAX_AGE_HOURS: usize = 24;
-const DEFAULT_MIN_SIZE_MB: u64 = 10;
+const DEFAULT_MAX_AGE_HOURS: u64 = 24;
 const DEFAULT_FS_CLEAN_INTERVAL_HRS: u64 = 12;
 
 const DEFAULT_RPC_ADDR: &str = "127.0.0.1:3737";
@@ -27,11 +26,11 @@ pub struct HyperliquidDataRpcCli {
     #[arg(short, default_value = DEFAULT_DATA_DIR, requires = "clean_fs")]
     pub data_dir: PathBuf,
 
-    #[arg(long, default_value_t = DEFAULT_MAX_AGE_HOURS, requires = "clean_fs")]
-    pub max_age_hours: usize,
+    #[arg(long, default_value_t = DEFAULT_MAX_AGE_HOURS, requires = "clean_fs", value_parser = clap::value_parser!(u64).range(DEFAULT_MAX_AGE_HOURS..))]
+    pub max_age_hours: u64,
 
-    #[arg(long, default_value_t = DEFAULT_MIN_SIZE_MB, requires = "clean_fs")]
-    pub min_size_mb: u64,
+    #[arg(long, requires = "clean_fs")]
+    pub min_size_mb: Option<u64>,
 
     #[arg(long = "fs-clean-interval-hours", default_value_t = DEFAULT_FS_CLEAN_INTERVAL_HRS, requires = "clean_fs")]
     pub fs_clean_interval_hours: u64,
