@@ -6,7 +6,7 @@ use hyperliquid_db_fs::HyperliquidDataFsConfig;
 use tracing::Level;
 
 const DEFAULT_DATA_DIR: &str = "/root/hl/data";
-const DEFAULT_MAX_AGE_HOURS: u64 = 24;
+const DEFAULT_MAX_AGE_HOURS: u64 = 48;
 const DEFAULT_FS_CLEAN_INTERVAL_HRS: u64 = 12;
 
 const DEFAULT_RPC_ADDR: &str = "127.0.0.1:3737";

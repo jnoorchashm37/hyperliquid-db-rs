@@ -5,7 +5,7 @@ use hyperliquid_db_fs::HyperliquidDataFsConfig;
 use tracing::Level;
 
 const DEFAULT_DATA_DIR: &str = "/root/hl/data";
-const DEFAULT_MAX_AGE_HOURS: u64 = 24;
+const DEFAULT_MAX_AGE_HOURS: u64 = 48;
 
 #[derive(Debug, Parser)]
 #[command(name = "hyperliquid-db-fs")]

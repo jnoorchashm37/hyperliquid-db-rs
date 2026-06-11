@@ -8,7 +8,7 @@ Restart=always
 RestartSec=10s
 Type=simple
 
-ExecStart=/root/hyperliquid-db-rs/target/maxperf/hyperliquid-db-fs -l 24
+ExecStart=/root/hyperliquid-db-rs/target/maxperf/hyperliquid-db-fs -l 48
   
 
 [Install]
