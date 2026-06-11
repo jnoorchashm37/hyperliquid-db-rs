@@ -11,6 +11,11 @@ use serde::{Deserialize, Serialize};
 pub use trades::{PendingTrade, Trade};
 mod l2_book;
 pub use l2_book::{L2Book, L2BookLevel};
+mod hip3_oracle_updates;
+pub use hip3_oracle_updates::{
+    Hip3OracleUpdate, Hip3OracleUpdateClass, Hip3OracleUpdateCoinPx, Hip3OracleUpdateOraclePxs,
+    Hip3OracleUpdatePxInput
+};
 use strum::IntoEnumIterator;
 
 use crate::{
@@ -28,7 +33,8 @@ pub struct HyperliquidDataWithMeta<D> {
 pub enum HyperliquidData {
     Trades(Vec<HyperliquidDataWithMeta<Trade>>),
     L4Book(Vec<HyperliquidDataWithMeta<L4Book>>),
-    L2Book(Vec<HyperliquidDataWithMeta<L2Book>>)
+    L2Book(Vec<HyperliquidDataWithMeta<L2Book>>),
+    Hip3OracleUpdates(Vec<HyperliquidDataWithMeta<Hip3OracleUpdate>>)
 }
 
 impl HyperliquidData {
@@ -36,7 +42,8 @@ impl HyperliquidData {
         match self {
             HyperliquidData::Trades(_) => HyperliquidDataKind::Trades,
             HyperliquidData::L4Book(_) => HyperliquidDataKind::L4Book,
-            HyperliquidData::L2Book(_) => HyperliquidDataKind::L2Book
+            HyperliquidData::L2Book(_) => HyperliquidDataKind::L2Book,
+            HyperliquidData::Hip3OracleUpdates(_) => HyperliquidDataKind::Hip3OracleUpdates
         }
     }
 }
@@ -45,7 +52,8 @@ impl HyperliquidData {
 pub enum HyperliquidDataKind {
     Trades,
     L4Book,
-    L2Book
+    L2Book,
+    Hip3OracleUpdates
 }
 
 impl HyperliquidDataKind {
@@ -59,6 +67,9 @@ impl HyperliquidDataKind {
             HyperliquidDataKind::L4Book | HyperliquidDataKind::L2Book => {
                 vec![HyperliquidDirKind::NodeOrderStatuses, HyperliquidDirKind::NodeRawBookDiffs]
             }
+            HyperliquidDataKind::Hip3OracleUpdates => {
+                vec![HyperliquidDirKind::Hip3OracleUpdates]
+            }
         }
     }
 
@@ -67,6 +78,9 @@ impl HyperliquidDataKind {
             HyperliquidDataKind::Trades => HyperliquidDataProcessorKind::Trades,
             HyperliquidDataKind::L4Book | HyperliquidDataKind::L2Book => {
                 HyperliquidDataProcessorKind::Orderbook
+            }
+            HyperliquidDataKind::Hip3OracleUpdates => {
+                HyperliquidDataProcessorKind::Hip3OracleUpdates
             }
         }
     }

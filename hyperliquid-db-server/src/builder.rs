@@ -39,7 +39,8 @@ fn channel_name(kind: HyperliquidDataKind) -> &'static str {
     match kind {
         HyperliquidDataKind::Trades => "trades",
         HyperliquidDataKind::L4Book => "l4Book",
-        HyperliquidDataKind::L2Book => "l2Book"
+        HyperliquidDataKind::L2Book => "l2Book",
+        HyperliquidDataKind::Hip3OracleUpdates => "hip3OracleUpdates"
     }
 }
 
@@ -47,6 +48,7 @@ fn route_name(kind: HyperliquidDataKind) -> &'static str {
     match kind {
         HyperliquidDataKind::Trades => "/subscribeTrades",
         HyperliquidDataKind::L4Book => "/subscribeL4Book",
-        HyperliquidDataKind::L2Book => "/subscribeL2Book"
+        HyperliquidDataKind::L2Book => "/subscribeL2Book",
+        HyperliquidDataKind::Hip3OracleUpdates => "/subscribeHip3OracleUpdates"
     }
 }

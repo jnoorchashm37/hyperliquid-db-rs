@@ -5,7 +5,10 @@ pub use node_order_statuses::{
     NodeOrderStatusesBuilder, NodeOrderStatusesEvent, NodeOrderStatusesOrder, NodeOrderStatusesRows
 };
 mod hip3_oracle_updates;
-pub use hip3_oracle_updates::Hip3OracleUpdatesRows;
+pub use hip3_oracle_updates::{
+    Hip3OracleUpdatesCoinPx, Hip3OracleUpdatesEvent, Hip3OracleUpdatesOraclePxs,
+    Hip3OracleUpdatesPxInput, Hip3OracleUpdatesRows, Hip3OracleUpdatesUpdateClass
+};
 mod node_raw_book_diffs;
 pub use node_raw_book_diffs::{
     NodeRawBookDiffsEvent, NodeRawBookDiffsRawBookDiff, NodeRawBookDiffsRows

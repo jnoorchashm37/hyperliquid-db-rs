@@ -63,7 +63,8 @@ impl HyperliquidDataRpcCli {
 pub enum CliDataKind {
     Trades,
     L4Book,
-    L2Book
+    L2Book,
+    Hip3OracleUpdates
 }
 
 impl From<CliDataKind> for HyperliquidDataKind {
@@ -71,7 +72,8 @@ impl From<CliDataKind> for HyperliquidDataKind {
         match value {
             CliDataKind::Trades => Self::Trades,
             CliDataKind::L4Book => Self::L4Book,
-            CliDataKind::L2Book => Self::L2Book
+            CliDataKind::L2Book => Self::L2Book,
+            CliDataKind::Hip3OracleUpdates => Self::Hip3OracleUpdates
         }
     }
 }
