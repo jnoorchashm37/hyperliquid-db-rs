@@ -103,204 +103,6 @@ impl<'de> Deserialize<'de> for MiscEventsInner {
             value.parse().map_err(serde::de::Error::custom)
         };
 
-        let parse_ledger_delta = |raw_delta: _private::MiscEventsLedgerDeltaRaw|
-         -> Result<MiscEventsLedgerDelta, D::Error> {
-            match raw_delta {
-                _private::MiscEventsLedgerDeltaRaw::Send {
-                    user,
-                    destination,
-                    source_dex,
-                    destination_dex,
-                    token,
-                    amount,
-                    usdc_value,
-                    fee,
-                    native_token_fee,
-                    nonce,
-                    fee_token
-                } => Ok(MiscEventsLedgerDelta::Send {
-                    user,
-                    destination,
-                    source_dex,
-                    destination_dex,
-                    token,
-                    amount: parse_f64(amount)?,
-                    usdc_value: parse_f64(usdc_value)?,
-                    fee: parse_f64(fee)?,
-                    native_token_fee: parse_f64(native_token_fee)?,
-                    nonce,
-                    fee_token
-                }),
-                _private::MiscEventsLedgerDeltaRaw::SpotTransfer {
-                    token,
-                    amount,
-                    usdc_value,
-                    user,
-                    destination,
-                    fee,
-                    native_token_fee,
-                    nonce,
-                    fee_token
-                } => Ok(MiscEventsLedgerDelta::SpotTransfer {
-                    token,
-                    amount: parse_f64(amount)?,
-                    usdc_value: parse_f64(usdc_value)?,
-                    user,
-                    destination,
-                    fee: parse_f64(fee)?,
-                    native_token_fee: parse_f64(native_token_fee)?,
-                    nonce,
-                    fee_token
-                }),
-                _private::MiscEventsLedgerDeltaRaw::AccountClassTransfer { usdc, to_perp } => {
-                    Ok(MiscEventsLedgerDelta::AccountClassTransfer {
-                        usdc: parse_f64(usdc)?,
-                        to_perp
-                    })
-                }
-                _private::MiscEventsLedgerDeltaRaw::SubAccountTransfer {
-                    usdc,
-                    user,
-                    destination
-                } => Ok(MiscEventsLedgerDelta::SubAccountTransfer {
-                    usdc: parse_f64(usdc)?,
-                    user,
-                    destination
-                }),
-                _private::MiscEventsLedgerDeltaRaw::InternalTransfer {
-                    usdc,
-                    user,
-                    destination,
-                    fee
-                } => Ok(MiscEventsLedgerDelta::InternalTransfer {
-                    usdc: parse_f64(usdc)?,
-                    user,
-                    destination,
-                    fee: parse_f64(fee)?
-                }),
-                _private::MiscEventsLedgerDeltaRaw::Deposit { usdc } => {
-                    Ok(MiscEventsLedgerDelta::Deposit { usdc: parse_f64(usdc)? })
-                }
-                _private::MiscEventsLedgerDeltaRaw::Withdraw { usdc, nonce, fee } => {
-                    Ok(MiscEventsLedgerDelta::Withdraw {
-                        usdc: parse_f64(usdc)?,
-                        nonce,
-                        fee: parse_f64(fee)?
-                    })
-                }
-                _private::MiscEventsLedgerDeltaRaw::CStakingTransfer {
-                    token,
-                    amount,
-                    is_deposit
-                } => Ok(MiscEventsLedgerDelta::CStakingTransfer {
-                    token,
-                    amount: parse_f64(amount)?,
-                    is_deposit
-                }),
-                _private::MiscEventsLedgerDeltaRaw::GossipPriorityGasAuction { token, amount } => {
-                    Ok(MiscEventsLedgerDelta::GossipPriorityGasAuction {
-                        token,
-                        amount: parse_f64(amount)?
-                    })
-                }
-                _private::MiscEventsLedgerDeltaRaw::BorrowLend {
-                    token,
-                    operation,
-                    amount,
-                    interest_amount
-                } => Ok(MiscEventsLedgerDelta::BorrowLend {
-                    token,
-                    operation,
-                    amount: parse_f64(amount)?,
-                    interest_amount: parse_f64(interest_amount)?
-                }),
-                _private::MiscEventsLedgerDeltaRaw::RewardsClaim { amount, token } => {
-                    Ok(MiscEventsLedgerDelta::RewardsClaim { amount: parse_f64(amount)?, token })
-                }
-                _private::MiscEventsLedgerDeltaRaw::VaultCreate { vault, usdc, fee } => {
-                    Ok(MiscEventsLedgerDelta::VaultCreate {
-                        vault,
-                        usdc: parse_f64(usdc)?,
-                        fee: parse_f64(fee)?
-                    })
-                }
-                _private::MiscEventsLedgerDeltaRaw::VaultDeposit { vault, usdc } => {
-                    Ok(MiscEventsLedgerDelta::VaultDeposit { vault, usdc: parse_f64(usdc)? })
-                }
-                _private::MiscEventsLedgerDeltaRaw::VaultWithdraw {
-                    vault,
-                    user,
-                    requested_usd,
-                    commission,
-                    closing_cost,
-                    basis,
-                    net_withdrawn_usd
-                } => Ok(MiscEventsLedgerDelta::VaultWithdraw {
-                    vault,
-                    user,
-                    requested_usd: parse_f64(requested_usd)?,
-                    commission: parse_f64(commission)?,
-                    closing_cost: parse_f64(closing_cost)?,
-                    basis: parse_f64(basis)?,
-                    net_withdrawn_usd: parse_f64(net_withdrawn_usd)?
-                }),
-                _private::MiscEventsLedgerDeltaRaw::VaultDistribution { vault, usdc } => {
-                    Ok(MiscEventsLedgerDelta::VaultDistribution { vault, usdc: parse_f64(usdc)? })
-                }
-                _private::MiscEventsLedgerDeltaRaw::VaultLeaderCommission { user, usdc } => {
-                    Ok(MiscEventsLedgerDelta::VaultLeaderCommission {
-                        user,
-                        usdc: parse_f64(usdc)?
-                    })
-                }
-                _private::MiscEventsLedgerDeltaRaw::Liquidation {
-                    liquidated_ntl_pos,
-                    account_value,
-                    leverage_type,
-                    liquidated_positions
-                } => Ok(MiscEventsLedgerDelta::Liquidation {
-                    liquidated_ntl_pos: parse_f64(liquidated_ntl_pos)?,
-                    account_value: parse_f64(account_value)?,
-                    leverage_type,
-                    liquidated_positions: liquidated_positions
-                        .into_iter()
-                        .map(|raw_position| {
-                            Ok(MiscEventsLiquidatedPosition {
-                                coin: raw_position.coin,
-                                szi:  parse_f64(raw_position.szi)?
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?
-                }),
-                _private::MiscEventsLedgerDeltaRaw::SpotGenesis { token, amount } => {
-                    Ok(MiscEventsLedgerDelta::SpotGenesis { token, amount: parse_f64(amount)? })
-                }
-                _private::MiscEventsLedgerDeltaRaw::AccountActivationGas { amount, token } => {
-                    Ok(MiscEventsLedgerDelta::AccountActivationGas {
-                        amount: parse_f64(amount)?,
-                        token
-                    })
-                }
-                _private::MiscEventsLedgerDeltaRaw::PerpDexClassTransfer {
-                    amount,
-                    token,
-                    dex,
-                    to_perp
-                } => Ok(MiscEventsLedgerDelta::PerpDexClassTransfer {
-                    amount: parse_f64(amount)?,
-                    token,
-                    dex,
-                    to_perp
-                }),
-                _private::MiscEventsLedgerDeltaRaw::DeployGasAuction { token, amount } => {
-                    Ok(MiscEventsLedgerDelta::DeployGasAuction {
-                        token,
-                        amount: parse_f64(amount)?
-                    })
-                }
-            }
-        };
-
         match raw {
             _private::MiscEventsInnerRaw::CDeposit { user, amount } => {
                 Ok(MiscEventsInner::CDeposit { user, amount: parse_f64(amount)? })
@@ -344,7 +146,7 @@ impl<'de> Deserialize<'de> for MiscEventsInner {
                     .collect::<Result<Vec<_>, _>>()?
             }),
             _private::MiscEventsInnerRaw::LedgerUpdate { users, delta } => {
-                Ok(MiscEventsInner::LedgerUpdate { users, delta: parse_ledger_delta(delta)? })
+                Ok(MiscEventsInner::LedgerUpdate { users, delta })
             }
             _private::MiscEventsInnerRaw::GossipPriorityAuctionRestart {
                 slot_id,
@@ -500,6 +302,201 @@ pub enum MiscEventsLedgerDelta {
     }
 }
 
+impl<'de> Deserialize<'de> for MiscEventsLedgerDelta {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>
+    {
+        let raw = _private::MiscEventsLedgerDeltaRaw::deserialize(deserializer)?;
+
+        let parse_f64 = |value: String| -> Result<f64, D::Error> {
+            value.parse().map_err(serde::de::Error::custom)
+        };
+
+        match raw {
+            _private::MiscEventsLedgerDeltaRaw::Send {
+                user,
+                destination,
+                source_dex,
+                destination_dex,
+                token,
+                amount,
+                usdc_value,
+                fee,
+                native_token_fee,
+                nonce,
+                fee_token
+            } => Ok(MiscEventsLedgerDelta::Send {
+                user,
+                destination,
+                source_dex,
+                destination_dex,
+                token,
+                amount: parse_f64(amount)?,
+                usdc_value: parse_f64(usdc_value)?,
+                fee: parse_f64(fee)?,
+                native_token_fee: parse_f64(native_token_fee)?,
+                nonce,
+                fee_token
+            }),
+            _private::MiscEventsLedgerDeltaRaw::SpotTransfer {
+                token,
+                amount,
+                usdc_value,
+                user,
+                destination,
+                fee,
+                native_token_fee,
+                nonce,
+                fee_token
+            } => Ok(MiscEventsLedgerDelta::SpotTransfer {
+                token,
+                amount: parse_f64(amount)?,
+                usdc_value: parse_f64(usdc_value)?,
+                user,
+                destination,
+                fee: parse_f64(fee)?,
+                native_token_fee: parse_f64(native_token_fee)?,
+                nonce,
+                fee_token
+            }),
+            _private::MiscEventsLedgerDeltaRaw::AccountClassTransfer { usdc, to_perp } => {
+                Ok(MiscEventsLedgerDelta::AccountClassTransfer { usdc: parse_f64(usdc)?, to_perp })
+            }
+            _private::MiscEventsLedgerDeltaRaw::SubAccountTransfer { usdc, user, destination } => {
+                Ok(MiscEventsLedgerDelta::SubAccountTransfer {
+                    usdc: parse_f64(usdc)?,
+                    user,
+                    destination
+                })
+            }
+            _private::MiscEventsLedgerDeltaRaw::InternalTransfer {
+                usdc,
+                user,
+                destination,
+                fee
+            } => Ok(MiscEventsLedgerDelta::InternalTransfer {
+                usdc: parse_f64(usdc)?,
+                user,
+                destination,
+                fee: parse_f64(fee)?
+            }),
+            _private::MiscEventsLedgerDeltaRaw::Deposit { usdc } => {
+                Ok(MiscEventsLedgerDelta::Deposit { usdc: parse_f64(usdc)? })
+            }
+            _private::MiscEventsLedgerDeltaRaw::Withdraw { usdc, nonce, fee } => {
+                Ok(MiscEventsLedgerDelta::Withdraw {
+                    usdc: parse_f64(usdc)?,
+                    nonce,
+                    fee: parse_f64(fee)?
+                })
+            }
+            _private::MiscEventsLedgerDeltaRaw::CStakingTransfer { token, amount, is_deposit } => {
+                Ok(MiscEventsLedgerDelta::CStakingTransfer {
+                    token,
+                    amount: parse_f64(amount)?,
+                    is_deposit
+                })
+            }
+            _private::MiscEventsLedgerDeltaRaw::GossipPriorityGasAuction { token, amount } => {
+                Ok(MiscEventsLedgerDelta::GossipPriorityGasAuction {
+                    token,
+                    amount: parse_f64(amount)?
+                })
+            }
+            _private::MiscEventsLedgerDeltaRaw::BorrowLend {
+                token,
+                operation,
+                amount,
+                interest_amount
+            } => Ok(MiscEventsLedgerDelta::BorrowLend {
+                token,
+                operation,
+                amount: parse_f64(amount)?,
+                interest_amount: parse_f64(interest_amount)?
+            }),
+            _private::MiscEventsLedgerDeltaRaw::RewardsClaim { amount, token } => {
+                Ok(MiscEventsLedgerDelta::RewardsClaim { amount: parse_f64(amount)?, token })
+            }
+            _private::MiscEventsLedgerDeltaRaw::VaultCreate { vault, usdc, fee } => {
+                Ok(MiscEventsLedgerDelta::VaultCreate {
+                    vault,
+                    usdc: parse_f64(usdc)?,
+                    fee: parse_f64(fee)?
+                })
+            }
+            _private::MiscEventsLedgerDeltaRaw::VaultDeposit { vault, usdc } => {
+                Ok(MiscEventsLedgerDelta::VaultDeposit { vault, usdc: parse_f64(usdc)? })
+            }
+            _private::MiscEventsLedgerDeltaRaw::VaultWithdraw {
+                vault,
+                user,
+                requested_usd,
+                commission,
+                closing_cost,
+                basis,
+                net_withdrawn_usd
+            } => Ok(MiscEventsLedgerDelta::VaultWithdraw {
+                vault,
+                user,
+                requested_usd: parse_f64(requested_usd)?,
+                commission: parse_f64(commission)?,
+                closing_cost: parse_f64(closing_cost)?,
+                basis: parse_f64(basis)?,
+                net_withdrawn_usd: parse_f64(net_withdrawn_usd)?
+            }),
+            _private::MiscEventsLedgerDeltaRaw::VaultDistribution { vault, usdc } => {
+                Ok(MiscEventsLedgerDelta::VaultDistribution { vault, usdc: parse_f64(usdc)? })
+            }
+            _private::MiscEventsLedgerDeltaRaw::VaultLeaderCommission { user, usdc } => {
+                Ok(MiscEventsLedgerDelta::VaultLeaderCommission { user, usdc: parse_f64(usdc)? })
+            }
+            _private::MiscEventsLedgerDeltaRaw::Liquidation {
+                liquidated_ntl_pos,
+                account_value,
+                leverage_type,
+                liquidated_positions
+            } => Ok(MiscEventsLedgerDelta::Liquidation {
+                liquidated_ntl_pos: parse_f64(liquidated_ntl_pos)?,
+                account_value: parse_f64(account_value)?,
+                leverage_type,
+                liquidated_positions: liquidated_positions
+                    .into_iter()
+                    .map(|raw_position| {
+                        Ok(MiscEventsLiquidatedPosition {
+                            coin: raw_position.coin,
+                            szi:  parse_f64(raw_position.szi)?
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }),
+            _private::MiscEventsLedgerDeltaRaw::SpotGenesis { token, amount } => {
+                Ok(MiscEventsLedgerDelta::SpotGenesis { token, amount: parse_f64(amount)? })
+            }
+            _private::MiscEventsLedgerDeltaRaw::AccountActivationGas { amount, token } => {
+                Ok(MiscEventsLedgerDelta::AccountActivationGas {
+                    amount: parse_f64(amount)?,
+                    token
+                })
+            }
+            _private::MiscEventsLedgerDeltaRaw::PerpDexClassTransfer {
+                amount,
+                token,
+                dex,
+                to_perp
+            } => Ok(MiscEventsLedgerDelta::PerpDexClassTransfer {
+                amount: parse_f64(amount)?,
+                token,
+                dex,
+                to_perp
+            }),
+            _private::MiscEventsLedgerDeltaRaw::DeployGasAuction { token, amount } => {
+                Ok(MiscEventsLedgerDelta::DeployGasAuction { token, amount: parse_f64(amount)? })
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize)]
 pub struct MiscEventsLiquidatedPosition {
     pub coin: String,
@@ -509,7 +506,7 @@ pub struct MiscEventsLiquidatedPosition {
 mod _private {
     use serde::{Deserialize, Serialize};
 
-    use super::{MiscEventsInner, MiscEventsPreviousWinner};
+    use super::{MiscEventsInner, MiscEventsLedgerDelta, MiscEventsPreviousWinner};
 
     #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
     pub struct MiscEventsRowsRaw {
@@ -551,7 +548,7 @@ mod _private {
         },
         LedgerUpdate {
             users: Vec<String>,
-            delta: MiscEventsLedgerDeltaRaw
+            delta: MiscEventsLedgerDelta
         },
         GossipPriorityAuctionRestart {
             slot_id:         u64,
