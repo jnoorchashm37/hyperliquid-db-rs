@@ -6,14 +6,16 @@ use std::{
 };
 
 use inotify::{EventMask, Inotify, WatchDescriptor, WatchMask};
+use serde::de::DeserializeOwned;
 
 use crate::{
     fs_handlers::types::{ActiveDirectory, FileTailState, FsOutData, FsPipelineTimestamps},
     hl_fs::{
         HyperliquidDirData, HyperliquidDirDataWithMeta, HyperliquidDirKind,
-        parsers::{
-            Hip3OracleUpdatesParser, HyperliquidDataParser, MiscEventsParser, NodeFillsParser,
-            NodeOrderStatusesParser, NodeRawBookDiffsParser
+        parser::HyperliquidDataParser,
+        schemas::{
+            Hip3OracleUpdatesRows, MiscEventsRows, NodeFillsRow, NodeOrderStatusesRows,
+            NodeRawBookDiffsRows, ReplicaCmdsRows
         }
     },
     utils::unix_timestamp
@@ -55,11 +57,12 @@ impl DirectoryWatcher {
     pub fn run(mut self) {
         std::thread::spawn(move || {
             let result = match self.name {
-                HyperliquidDirKind::NodeFills => self.run_safe::<NodeFillsParser>(),
-                HyperliquidDirKind::NodeOrderStatuses => self.run_safe::<NodeOrderStatusesParser>(),
-                HyperliquidDirKind::NodeRawBookDiffs => self.run_safe::<NodeRawBookDiffsParser>(),
-                HyperliquidDirKind::Hip3OracleUpdates => self.run_safe::<Hip3OracleUpdatesParser>(),
-                HyperliquidDirKind::MiscEvents => self.run_safe::<MiscEventsParser>()
+                HyperliquidDirKind::NodeFills => self.run_safe::<NodeFillsRow>(),
+                HyperliquidDirKind::NodeOrderStatuses => self.run_safe::<NodeOrderStatusesRows>(),
+                HyperliquidDirKind::NodeRawBookDiffs => self.run_safe::<NodeRawBookDiffsRows>(),
+                HyperliquidDirKind::Hip3OracleUpdates => self.run_safe::<Hip3OracleUpdatesRows>(),
+                HyperliquidDirKind::MiscEvents => self.run_safe::<MiscEventsRows>(),
+                HyperliquidDirKind::ReplicaCmds => self.run_safe::<ReplicaCmdsRows>()
             };
             if let Err(error) = result {
                 tracing::error!("error running filesystem watcher: {error:?}");
@@ -72,12 +75,12 @@ impl DirectoryWatcher {
         });
     }
 
-    fn run_safe<P>(&mut self) -> eyre::Result<()>
+    fn run_safe<T>(&mut self) -> eyre::Result<()>
     where
-        P: HyperliquidDataParser,
-        HyperliquidDirData: From<Vec<P::ParsedType>>
+        T: DeserializeOwned,
+        HyperliquidDirData: From<Vec<T>>
     {
-        let mut parser = P::default();
+        let mut parser = HyperliquidDataParser::new();
 
         let mut event_buf = [0_u8; 16 * 1024];
         tracing::info!(name = ?self.name, "waiting for filesystem events");
@@ -222,15 +225,15 @@ impl DirectoryWatcher {
         }
     }
 
-    fn drain_new_files_recursive<P>(
+    fn drain_new_files_recursive<T>(
         &mut self,
-        parser: &mut P,
+        parser: &mut HyperliquidDataParser,
         dir_path: &Path,
         notification_batch_received_at_ns: u128
     ) -> eyre::Result<()>
     where
-        P: HyperliquidDataParser,
-        HyperliquidDirData: From<Vec<P::ParsedType>>
+        T: DeserializeOwned,
+        HyperliquidDirData: From<Vec<T>>
     {
         if !dir_path.is_dir() {
             return Ok(());
@@ -253,15 +256,15 @@ impl DirectoryWatcher {
         Ok(())
     }
 
-    fn drain_file<P>(
+    fn drain_file<T>(
         &mut self,
-        parser: &mut P,
+        parser: &mut HyperliquidDataParser,
         path: &Path,
         notification_batch_received_at_ns: u128
     ) -> eyre::Result<()>
     where
-        P: HyperliquidDataParser,
-        HyperliquidDirData: From<Vec<P::ParsedType>>
+        T: DeserializeOwned,
+        HyperliquidDirData: From<Vec<T>>
     {
         tracing::trace!(name = ?self.name, path = ?path, "draining file");
         let drain_file_started_at_ns = unix_timestamp().as_nanos();

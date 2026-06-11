@@ -12,7 +12,7 @@ use crate::{
     fs_handlers::types::FsOutData,
     hl_fs::schemas::{
         Hip3OracleUpdatesRows, MiscEventsRows, NodeFillsRow, NodeOrderStatusesRows,
-        NodeRawBookDiffsRows
+        NodeRawBookDiffsRows, ReplicaCmdsRows
     }
 };
 
@@ -28,7 +28,8 @@ pub enum HyperliquidDirData {
     NodeRawBookDiffs(Vec<NodeRawBookDiffsRows>),
     NodeFills(Vec<NodeFillsRow>),
     Hip3OracleUpdates(Vec<Hip3OracleUpdatesRows>),
-    MiscEvents(Vec<MiscEventsRows>)
+    MiscEvents(Vec<MiscEventsRows>),
+    ReplicaCmds(Vec<ReplicaCmdsRows>)
 }
 
 impl HyperliquidDirData {
@@ -38,7 +39,8 @@ impl HyperliquidDirData {
             HyperliquidDirData::NodeOrderStatuses(_) => HyperliquidDirKind::NodeOrderStatuses,
             HyperliquidDirData::NodeRawBookDiffs(_) => HyperliquidDirKind::NodeRawBookDiffs,
             HyperliquidDirData::Hip3OracleUpdates(_) => HyperliquidDirKind::Hip3OracleUpdates,
-            HyperliquidDirData::MiscEvents(_) => HyperliquidDirKind::MiscEvents
+            HyperliquidDirData::MiscEvents(_) => HyperliquidDirKind::MiscEvents,
+            HyperliquidDirData::ReplicaCmds(_) => HyperliquidDirKind::ReplicaCmds
         }
     }
 }
@@ -49,7 +51,8 @@ pub enum HyperliquidDirKind {
     NodeRawBookDiffs,
     NodeFills,
     Hip3OracleUpdates,
-    MiscEvents
+    MiscEvents,
+    ReplicaCmds
 }
 
 impl HyperliquidDirKind {
@@ -60,7 +63,8 @@ impl HyperliquidDirKind {
             HyperliquidDirKind::NodeRawBookDiffs => "node_raw_book_diffs_streaming",
             HyperliquidDirKind::NodeFills => "node_fills_streaming",
             HyperliquidDirKind::Hip3OracleUpdates => "hip3_oracle_updates_streaming",
-            HyperliquidDirKind::MiscEvents => "misc_events_streaming"
+            HyperliquidDirKind::MiscEvents => "misc_events_streaming",
+            HyperliquidDirKind::ReplicaCmds => "replica_cmds"
         };
 
         base_dir.join(ext_dir)
@@ -81,6 +85,7 @@ impl FromStr for HyperliquidDirKind {
             "node_fills_streaming" => Ok(Self::NodeFills),
             "hip3_oracle_updates_streaming" => Ok(Self::Hip3OracleUpdates),
             "misc_events_streaming" => Ok(Self::MiscEvents),
+            "replica_cmds" => Ok(Self::ReplicaCmds),
             _ => Err(eyre::eyre!("invalid `HyperliquidDirKind`: {s}"))
         }
     }
@@ -93,7 +98,8 @@ impl fmt::Display for HyperliquidDirKind {
             HyperliquidDirKind::NodeRawBookDiffs => "node_raw_book_diffs_streaming",
             HyperliquidDirKind::NodeFills => "node_fills_streaming",
             HyperliquidDirKind::Hip3OracleUpdates => "hip3_oracle_updates_streaming",
-            HyperliquidDirKind::MiscEvents => "misc_events_streaming"
+            HyperliquidDirKind::MiscEvents => "misc_events_streaming",
+            HyperliquidDirKind::ReplicaCmds => "replica_cmds"
         };
 
         fmt::Display::fmt(s, f)

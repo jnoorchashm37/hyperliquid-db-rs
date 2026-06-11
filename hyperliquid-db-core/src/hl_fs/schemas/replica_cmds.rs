@@ -1047,18 +1047,7 @@ where
 }
 
 mod _private {
-    use serde::{Deserialize, Serialize};
-
-    use super::{
-        ReplicaCmdsBridgeDepositVote, ReplicaCmdsBuilder, ReplicaCmdsCancel,
-        ReplicaCmdsCancelByCloid, ReplicaCmdsCoinPx, ReplicaCmdsEthId, ReplicaCmdsGrouping,
-        ReplicaCmdsHardfork, ReplicaCmdsMergeOutcome, ReplicaCmdsModify,
-        ReplicaCmdsMultiSigPayload, ReplicaCmdsNegateOutcome, ReplicaCmdsOid, ReplicaCmdsOrder,
-        ReplicaCmdsOrderType, ReplicaCmdsPerpDeploySetOracle, ReplicaCmdsResps,
-        ReplicaCmdsSetGlobalPx, ReplicaCmdsSignature, ReplicaCmdsSignedAction,
-        ReplicaCmdsSignedActionBundle, ReplicaCmdsSplitOutcome, ReplicaCmdsToggleSpotDusting,
-        ReplicaCmdsTwap, ReplicaCmdsUserResp
-    };
+    use super::*;
 
     #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
     pub struct ReplicaCmdsRowsRaw {

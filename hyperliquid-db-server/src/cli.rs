@@ -64,7 +64,8 @@ pub enum CliDataKind {
     L4Book,
     L2Book,
     Hip3OracleUpdates,
-    MiscEvents
+    MiscEvents,
+    ReplicaCmds
 }
 
 impl From<CliDataKind> for HyperliquidDataKind {
@@ -74,7 +75,8 @@ impl From<CliDataKind> for HyperliquidDataKind {
             CliDataKind::L4Book => Self::L4Book,
             CliDataKind::L2Book => Self::L2Book,
             CliDataKind::Hip3OracleUpdates => Self::Hip3OracleUpdates,
-            CliDataKind::MiscEvents => Self::MiscEvents
+            CliDataKind::MiscEvents => Self::MiscEvents,
+            CliDataKind::ReplicaCmds => Self::ReplicaCmds
         }
     }
 }

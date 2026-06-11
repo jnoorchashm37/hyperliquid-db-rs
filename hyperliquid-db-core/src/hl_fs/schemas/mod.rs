@@ -1,38 +1,54 @@
 mod node_fills;
-pub use node_fills::{NodeFillsFill, NodeFillsRow, NodeFillsSide};
+pub use node_fills::*;
 mod node_order_statuses;
-pub use node_order_statuses::{
-    NodeOrderStatusesBuilder, NodeOrderStatusesEvent, NodeOrderStatusesOrder, NodeOrderStatusesRows
-};
+pub use node_order_statuses::*;
 mod hip3_oracle_updates;
-pub use hip3_oracle_updates::{
-    Hip3OracleUpdatesCoinPx, Hip3OracleUpdatesEvent, Hip3OracleUpdatesOraclePxs,
-    Hip3OracleUpdatesPxInput, Hip3OracleUpdatesRows, Hip3OracleUpdatesUpdateClass
-};
+pub use hip3_oracle_updates::*;
 mod node_raw_book_diffs;
-pub use node_raw_book_diffs::{
-    NodeRawBookDiffsEvent, NodeRawBookDiffsRawBookDiff, NodeRawBookDiffsRows
-};
+pub use node_raw_book_diffs::*;
 
 mod misc_events;
-pub use misc_events::{
-    MiscEventsEvent, MiscEventsFundingDelta, MiscEventsInner, MiscEventsLedgerDelta,
-    MiscEventsLiquidatedPosition, MiscEventsPreviousWinner, MiscEventsRows,
-    MiscEventsValidatorReward
-};
+pub use misc_events::*;
 
 mod replica_cmds;
-pub use replica_cmds::{
-    ReplicaCmdsAbciBlock, ReplicaCmdsAction, ReplicaCmdsBridgeDepositVote, ReplicaCmdsBuilder,
-    ReplicaCmdsCancel, ReplicaCmdsCancelByCloid, ReplicaCmdsCoinPx, ReplicaCmdsEthId,
-    ReplicaCmdsGrouping, ReplicaCmdsHardfork, ReplicaCmdsMergeOutcome, ReplicaCmdsModify,
-    ReplicaCmdsMultiSigPayload, ReplicaCmdsNegateOutcome, ReplicaCmdsOid, ReplicaCmdsOrder,
-    ReplicaCmdsOrderStatus, ReplicaCmdsOrderType, ReplicaCmdsPerpDeploySetOracle, ReplicaCmdsRes,
-    ReplicaCmdsRespBundle, ReplicaCmdsResponse, ReplicaCmdsResps, ReplicaCmdsRows,
-    ReplicaCmdsSetGlobalPx, ReplicaCmdsSignature, ReplicaCmdsSignedAction,
-    ReplicaCmdsSignedActionBundle, ReplicaCmdsSplitOutcome, ReplicaCmdsStatusesData,
-    ReplicaCmdsToggleSpotDusting, ReplicaCmdsTwap, ReplicaCmdsTwapData, ReplicaCmdsTwapStatus,
-    ReplicaCmdsUserResp
-};
+pub use replica_cmds::*;
+
+use crate::hl_fs::HyperliquidDirData;
 
 pub const NODE_DATA_DATE_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f";
+
+impl From<Vec<Hip3OracleUpdatesRows>> for HyperliquidDirData {
+    fn from(value: Vec<Hip3OracleUpdatesRows>) -> Self {
+        Self::Hip3OracleUpdates(value)
+    }
+}
+
+impl From<Vec<NodeFillsRow>> for HyperliquidDirData {
+    fn from(value: Vec<NodeFillsRow>) -> Self {
+        Self::NodeFills(value)
+    }
+}
+
+impl From<Vec<NodeOrderStatusesRows>> for HyperliquidDirData {
+    fn from(value: Vec<NodeOrderStatusesRows>) -> Self {
+        Self::NodeOrderStatuses(value)
+    }
+}
+
+impl From<Vec<NodeRawBookDiffsRows>> for HyperliquidDirData {
+    fn from(value: Vec<NodeRawBookDiffsRows>) -> Self {
+        Self::NodeRawBookDiffs(value)
+    }
+}
+
+impl From<Vec<ReplicaCmdsRows>> for HyperliquidDirData {
+    fn from(value: Vec<ReplicaCmdsRows>) -> Self {
+        Self::ReplicaCmds(value)
+    }
+}
+
+impl From<Vec<MiscEventsRows>> for HyperliquidDirData {
+    fn from(value: Vec<MiscEventsRows>) -> Self {
+        Self::MiscEvents(value)
+    }
+}

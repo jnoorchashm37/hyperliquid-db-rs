@@ -1,32 +1,39 @@
 use std::sync::Arc;
 
 use eyre::Context;
-
-mod node_fills;
-pub use node_fills::NodeFillsParser;
-
-mod hip3_oracle_updates;
-pub use hip3_oracle_updates::Hip3OracleUpdatesParser;
-mod node_order_statuses;
-pub use node_order_statuses::NodeOrderStatusesParser;
-
-mod misc_events;
-pub use misc_events::MiscEventsParser;
-mod node_raw_book_diffs;
-pub use node_raw_book_diffs::NodeRawBookDiffsParser;
+use serde::de::DeserializeOwned;
 
 use crate::{
     fs_handlers::types::FsOutData,
-    hl_fs::{HyperliquidDirData, types::HyperliquidDirDataWithMeta}
+    hl_fs::{HyperliquidDirData, HyperliquidDirDataWithMeta}
 };
 
-pub trait HyperliquidDataParser: Default
-where
-    HyperliquidDirData: From<Vec<Self::ParsedType>>
-{
-    type ParsedType;
+#[derive(Default)]
+pub struct HyperliquidDataParser {
+    line_buffer: Vec<u8>
+}
 
-    fn handle_raw_data(&mut self, data: FsOutData) -> eyre::Result<HyperliquidDirDataWithMeta> {
+impl HyperliquidDataParser {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn line_buffer(&mut self) -> &mut Vec<u8> {
+        &mut self.line_buffer
+    }
+
+    fn parse_raw_type<T: DeserializeOwned>(data: &[u8]) -> eyre::Result<T> {
+        Ok(serde_json::from_slice::<T>(data)?)
+    }
+
+    pub fn handle_raw_data<T>(
+        &mut self,
+        data: FsOutData
+    ) -> eyre::Result<HyperliquidDirDataWithMeta>
+    where
+        T: DeserializeOwned,
+        HyperliquidDirData: From<Vec<T>>
+    {
         let arced_data = Arc::new(data.clone());
         let path = data.path;
         let mut buffer = std::mem::take(self.line_buffer());
@@ -48,7 +55,7 @@ where
                 .iter()
                 .all(|byte| byte.is_ascii_whitespace())
             {
-                let parsed_value = match Self::parse_raw_type(line).wrap_err_with(|| {
+                let parsed_value = match Self::parse_raw_type::<T>(line).wrap_err_with(|| {
                     format!("failed to parse node_fills_streaming row from {path}")
                 }) {
                     Ok(parsed_value) => parsed_value,
@@ -74,8 +81,4 @@ where
             pipeline_meta: arced_data.clone()
         })
     }
-
-    fn line_buffer(&mut self) -> &mut Vec<u8>;
-
-    fn parse_raw_type(data: &[u8]) -> eyre::Result<Self::ParsedType>;
 }

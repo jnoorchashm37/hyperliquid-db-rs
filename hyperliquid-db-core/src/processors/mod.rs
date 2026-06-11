@@ -10,6 +10,9 @@ pub use hip3_oracle_updates::Hip3OracleUpdatesDeriver;
 mod misc_events;
 pub use misc_events::MiscEventsDeriver;
 
+mod replica_cmds;
+pub use replica_cmds::ReplicaCmdsDeriver;
+
 use crate::{hl_fs::HyperliquidDirDataWithMeta, types::HyperliquidData};
 
 pub trait HyperliquidDataProcessorHandle: Send {
@@ -24,5 +27,6 @@ pub enum HyperliquidDataProcessorKind {
     Trades,
     Orderbook,
     Hip3OracleUpdates,
-    MiscEvents
+    MiscEvents,
+    ReplicaCmds
 }

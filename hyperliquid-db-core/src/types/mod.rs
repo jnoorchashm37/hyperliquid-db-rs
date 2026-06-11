@@ -21,6 +21,8 @@ pub use misc_events::{
     MiscEvent, MiscEventFundingDelta, MiscEventInner, MiscEventLedgerDelta,
     MiscEventLiquidatedPosition, MiscEventPreviousWinner, MiscEventValidatorReward
 };
+mod replica_cmds;
+pub use replica_cmds::*;
 use strum::IntoEnumIterator;
 
 use crate::{
@@ -40,7 +42,8 @@ pub enum HyperliquidData {
     L4Book(Vec<HyperliquidDataWithMeta<L4Book>>),
     L2Book(Vec<HyperliquidDataWithMeta<L2Book>>),
     Hip3OracleUpdates(Vec<HyperliquidDataWithMeta<Hip3OracleUpdate>>),
-    MiscEvents(Vec<HyperliquidDataWithMeta<MiscEvent>>)
+    MiscEvents(Vec<HyperliquidDataWithMeta<MiscEvent>>),
+    ReplicaCmds(Vec<HyperliquidDataWithMeta<ReplicaCmd>>)
 }
 
 impl HyperliquidData {
@@ -50,7 +53,8 @@ impl HyperliquidData {
             HyperliquidData::L4Book(_) => HyperliquidDataKind::L4Book,
             HyperliquidData::L2Book(_) => HyperliquidDataKind::L2Book,
             HyperliquidData::Hip3OracleUpdates(_) => HyperliquidDataKind::Hip3OracleUpdates,
-            HyperliquidData::MiscEvents(_) => HyperliquidDataKind::MiscEvents
+            HyperliquidData::MiscEvents(_) => HyperliquidDataKind::MiscEvents,
+            HyperliquidData::ReplicaCmds(_) => HyperliquidDataKind::ReplicaCmds
         }
     }
 }
@@ -61,7 +65,8 @@ pub enum HyperliquidDataKind {
     L4Book,
     L2Book,
     Hip3OracleUpdates,
-    MiscEvents
+    MiscEvents,
+    ReplicaCmds
 }
 
 impl HyperliquidDataKind {
@@ -81,6 +86,9 @@ impl HyperliquidDataKind {
             HyperliquidDataKind::MiscEvents => {
                 vec![HyperliquidDirKind::MiscEvents]
             }
+            HyperliquidDataKind::ReplicaCmds => {
+                vec![HyperliquidDirKind::ReplicaCmds]
+            }
         }
     }
 
@@ -93,7 +101,8 @@ impl HyperliquidDataKind {
             HyperliquidDataKind::Hip3OracleUpdates => {
                 HyperliquidDataProcessorKind::Hip3OracleUpdates
             }
-            HyperliquidDataKind::MiscEvents => HyperliquidDataProcessorKind::MiscEvents
+            HyperliquidDataKind::MiscEvents => HyperliquidDataProcessorKind::MiscEvents,
+            HyperliquidDataKind::ReplicaCmds => HyperliquidDataProcessorKind::ReplicaCmds
         }
     }
 }
