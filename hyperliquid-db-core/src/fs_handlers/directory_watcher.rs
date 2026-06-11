@@ -12,7 +12,8 @@ use crate::{
     hl_fs::{
         HyperliquidDirData, HyperliquidDirDataWithMeta, HyperliquidDirKind,
         parsers::{
-            HyperliquidDataParser, NodeFillsParser, NodeOrderStatusesParser, NodeRawBookDiffsParser
+            Hip3OracleUpdatesParser, HyperliquidDataParser, MiscEventsParser, NodeFillsParser,
+            NodeOrderStatusesParser, NodeRawBookDiffsParser
         }
     },
     utils::unix_timestamp
@@ -57,7 +58,8 @@ impl DirectoryWatcher {
                 HyperliquidDirKind::NodeFills => self.run_safe::<NodeFillsParser>(),
                 HyperliquidDirKind::NodeOrderStatuses => self.run_safe::<NodeOrderStatusesParser>(),
                 HyperliquidDirKind::NodeRawBookDiffs => self.run_safe::<NodeRawBookDiffsParser>(),
-                HyperliquidDirKind::Hip3OracleUpdates => self.run_safe::<Hip3OracleUpdatesParser>()
+                HyperliquidDirKind::Hip3OracleUpdates => self.run_safe::<Hip3OracleUpdatesParser>(),
+                HyperliquidDirKind::MiscEvents => self.run_safe::<MiscEventsParser>()
             };
             if let Err(error) = result {
                 tracing::error!("error running filesystem watcher: {error:?}");

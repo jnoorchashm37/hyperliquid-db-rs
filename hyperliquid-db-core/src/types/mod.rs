@@ -16,6 +16,11 @@ pub use hip3_oracle_updates::{
     Hip3OracleUpdate, Hip3OracleUpdateClass, Hip3OracleUpdateCoinPx, Hip3OracleUpdateOraclePxs,
     Hip3OracleUpdatePxInput
 };
+mod misc_events;
+pub use misc_events::{
+    MiscEvent, MiscEventFundingDelta, MiscEventInner, MiscEventLedgerDelta,
+    MiscEventLiquidatedPosition, MiscEventPreviousWinner, MiscEventValidatorReward
+};
 use strum::IntoEnumIterator;
 
 use crate::{
@@ -34,7 +39,8 @@ pub enum HyperliquidData {
     Trades(Vec<HyperliquidDataWithMeta<Trade>>),
     L4Book(Vec<HyperliquidDataWithMeta<L4Book>>),
     L2Book(Vec<HyperliquidDataWithMeta<L2Book>>),
-    Hip3OracleUpdates(Vec<HyperliquidDataWithMeta<Hip3OracleUpdate>>)
+    Hip3OracleUpdates(Vec<HyperliquidDataWithMeta<Hip3OracleUpdate>>),
+    MiscEvents(Vec<HyperliquidDataWithMeta<MiscEvent>>)
 }
 
 impl HyperliquidData {
@@ -43,7 +49,8 @@ impl HyperliquidData {
             HyperliquidData::Trades(_) => HyperliquidDataKind::Trades,
             HyperliquidData::L4Book(_) => HyperliquidDataKind::L4Book,
             HyperliquidData::L2Book(_) => HyperliquidDataKind::L2Book,
-            HyperliquidData::Hip3OracleUpdates(_) => HyperliquidDataKind::Hip3OracleUpdates
+            HyperliquidData::Hip3OracleUpdates(_) => HyperliquidDataKind::Hip3OracleUpdates,
+            HyperliquidData::MiscEvents(_) => HyperliquidDataKind::MiscEvents
         }
     }
 }
@@ -53,7 +60,8 @@ pub enum HyperliquidDataKind {
     Trades,
     L4Book,
     L2Book,
-    Hip3OracleUpdates
+    Hip3OracleUpdates,
+    MiscEvents
 }
 
 impl HyperliquidDataKind {
@@ -70,6 +78,9 @@ impl HyperliquidDataKind {
             HyperliquidDataKind::Hip3OracleUpdates => {
                 vec![HyperliquidDirKind::Hip3OracleUpdates]
             }
+            HyperliquidDataKind::MiscEvents => {
+                vec![HyperliquidDirKind::MiscEvents]
+            }
         }
     }
 
@@ -82,6 +93,7 @@ impl HyperliquidDataKind {
             HyperliquidDataKind::Hip3OracleUpdates => {
                 HyperliquidDataProcessorKind::Hip3OracleUpdates
             }
+            HyperliquidDataKind::MiscEvents => HyperliquidDataProcessorKind::MiscEvents
         }
     }
 }

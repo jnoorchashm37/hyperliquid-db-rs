@@ -8,7 +8,7 @@ use crate::{
     hl_fs::HyperliquidDirDataWithMeta,
     processors::{
         Hip3OracleUpdatesDeriver, HyperliquidDataProcessorHandle, HyperliquidDataProcessorKind,
-        OrderBookDeriver, TradeDeriver
+        MiscEventsDeriver, OrderBookDeriver, TradeDeriver
     },
     types::{HyperliquidData, HyperliquidDataKind}
 };
@@ -118,6 +118,9 @@ fn kind_to_processor(
         HyperliquidDataProcessorKind::Orderbook => {
             Box::new(OrderBookDeriver::for_data_kinds(data_kinds))
         }
-        HyperliquidDataProcessorKind::Hip3OracleUpdates => Box::new(Hip3OracleUpdatesDeriver::new())
+        HyperliquidDataProcessorKind::Hip3OracleUpdates => {
+            Box::new(Hip3OracleUpdatesDeriver::new())
+        }
+        HyperliquidDataProcessorKind::MiscEvents => Box::new(MiscEventsDeriver::new())
     }
 }

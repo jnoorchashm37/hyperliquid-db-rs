@@ -15,6 +15,10 @@ pub use node_raw_book_diffs::{
 };
 
 mod misc_events;
-pub use misc_events::MiscEventsRows;
+pub use misc_events::{
+    MiscEventsEvent, MiscEventsFundingDelta, MiscEventsInner, MiscEventsLedgerDelta,
+    MiscEventsLiquidatedPosition, MiscEventsPreviousWinner, MiscEventsRows,
+    MiscEventsValidatorReward
+};
 
 pub const NODE_DATA_DATE_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f";
