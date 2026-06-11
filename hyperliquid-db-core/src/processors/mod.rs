@@ -4,6 +4,9 @@ pub use trades::TradeDeriver;
 mod orderbook;
 pub use orderbook::OrderBookDeriver;
 
+mod hip3_oracle_updates;
+pub use hip3_oracle_updates::Hip3OracleUpdatesDeriver;
+
 use crate::{hl_fs::HyperliquidDirDataWithMeta, types::HyperliquidData};
 
 pub trait HyperliquidDataProcessorHandle: Send {
@@ -16,5 +19,6 @@ pub trait HyperliquidDataProcessorHandle: Send {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter)]
 pub enum HyperliquidDataProcessorKind {
     Trades,
-    Orderbook
+    Orderbook,
+    Hip3OracleUpdates
 }
