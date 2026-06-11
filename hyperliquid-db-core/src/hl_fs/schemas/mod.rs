@@ -21,4 +21,18 @@ pub use misc_events::{
     MiscEventsValidatorReward
 };
 
+mod replica_cmds;
+pub use replica_cmds::{
+    ReplicaCmdsAbciBlock, ReplicaCmdsAction, ReplicaCmdsBridgeDepositVote, ReplicaCmdsBuilder,
+    ReplicaCmdsCancel, ReplicaCmdsCancelByCloid, ReplicaCmdsCoinPx, ReplicaCmdsEthId,
+    ReplicaCmdsGrouping, ReplicaCmdsHardfork, ReplicaCmdsMergeOutcome, ReplicaCmdsModify,
+    ReplicaCmdsMultiSigPayload, ReplicaCmdsNegateOutcome, ReplicaCmdsOid, ReplicaCmdsOrder,
+    ReplicaCmdsOrderStatus, ReplicaCmdsOrderType, ReplicaCmdsPerpDeploySetOracle, ReplicaCmdsRes,
+    ReplicaCmdsRespBundle, ReplicaCmdsResponse, ReplicaCmdsResps, ReplicaCmdsRows,
+    ReplicaCmdsSetGlobalPx, ReplicaCmdsSignature, ReplicaCmdsSignedAction,
+    ReplicaCmdsSignedActionBundle, ReplicaCmdsSplitOutcome, ReplicaCmdsStatusesData,
+    ReplicaCmdsToggleSpotDusting, ReplicaCmdsTwap, ReplicaCmdsTwapData, ReplicaCmdsTwapStatus,
+    ReplicaCmdsUserResp
+};
+
 pub const NODE_DATA_DATE_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f";
