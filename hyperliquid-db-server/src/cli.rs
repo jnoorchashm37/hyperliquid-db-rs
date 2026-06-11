@@ -7,7 +7,7 @@ use tracing::Level;
 
 const DEFAULT_DATA_DIR: &str = "/root/hl/data";
 const DEFAULT_MAX_AGE_HOURS: usize = 24;
-const DEFAULT_MIN_SIZE_MB: u64 = 1000;
+const DEFAULT_MIN_SIZE_MB: u64 = 10;
 const DEFAULT_FS_CLEAN_INTERVAL_HRS: u64 = 12;
 
 const DEFAULT_RPC_ADDR: &str = "127.0.0.1:3737";

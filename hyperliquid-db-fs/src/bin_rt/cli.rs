@@ -6,7 +6,7 @@ use tracing::Level;
 
 const DEFAULT_DATA_DIR: &str = "/root/hl/data";
 const DEFAULT_MAX_AGE_HOURS: usize = 24;
-const DEFAULT_MIN_SIZE_MB: u64 = 100;
+const DEFAULT_MIN_SIZE_MB: u64 = 10;
 
 #[derive(Debug, Parser)]
 #[command(name = "hyperliquid-db-fs")]
