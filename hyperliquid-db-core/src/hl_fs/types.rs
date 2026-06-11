@@ -10,7 +10,10 @@ use strum::IntoEnumIterator;
 use crate::{
     HYPERLIQUID_DATA_DIR,
     fs_handlers::types::FsOutData,
-    hl_fs::schemas::{NodeFillsRow, NodeOrderStatusesRows, NodeRawBookDiffsRows}
+    hl_fs::schemas::{
+        Hip3OracleUpdatesRows, MiscEventsRows, NodeFillsRow, NodeOrderStatusesRows,
+        NodeRawBookDiffsRows
+    }
 };
 
 #[derive(Debug, Clone)]
@@ -23,7 +26,9 @@ pub struct HyperliquidDirDataWithMeta {
 pub enum HyperliquidDirData {
     NodeOrderStatuses(Vec<NodeOrderStatusesRows>),
     NodeRawBookDiffs(Vec<NodeRawBookDiffsRows>),
-    NodeFills(Vec<NodeFillsRow>)
+    NodeFills(Vec<NodeFillsRow>),
+    Hip3OracleUpdates(Vec<Hip3OracleUpdatesRows>),
+    MiscEvents(Vec<MiscEventsRows>)
 }
 
 impl HyperliquidDirData {
@@ -31,7 +36,9 @@ impl HyperliquidDirData {
         match self {
             HyperliquidDirData::NodeFills(_) => HyperliquidDirKind::NodeFills,
             HyperliquidDirData::NodeOrderStatuses(_) => HyperliquidDirKind::NodeOrderStatuses,
-            HyperliquidDirData::NodeRawBookDiffs(_) => HyperliquidDirKind::NodeRawBookDiffs
+            HyperliquidDirData::NodeRawBookDiffs(_) => HyperliquidDirKind::NodeRawBookDiffs,
+            HyperliquidDirData::Hip3OracleUpdates(_) => HyperliquidDirKind::Hip3OracleUpdates,
+            HyperliquidDirData::MiscEvents(_) => HyperliquidDirKind::MiscEvents
         }
     }
 }
@@ -46,7 +53,9 @@ impl From<Vec<NodeFillsRow>> for HyperliquidDirData {
 pub enum HyperliquidDirKind {
     NodeOrderStatuses,
     NodeRawBookDiffs,
-    NodeFills
+    NodeFills,
+    Hip3OracleUpdates,
+    MiscEvents
 }
 
 impl HyperliquidDirKind {
@@ -55,7 +64,9 @@ impl HyperliquidDirKind {
         let ext_dir = match self {
             HyperliquidDirKind::NodeOrderStatuses => "node_order_statuses_streaming",
             HyperliquidDirKind::NodeRawBookDiffs => "node_raw_book_diffs_streaming",
-            HyperliquidDirKind::NodeFills => "node_fills_streaming"
+            HyperliquidDirKind::NodeFills => "node_fills_streaming",
+            HyperliquidDirKind::Hip3OracleUpdates => "hip3_oracle_updates_streaming",
+            HyperliquidDirKind::MiscEvents => "misc_events_streaming"
         };
 
         base_dir.join(ext_dir)
@@ -74,6 +85,8 @@ impl FromStr for HyperliquidDirKind {
             "node_order_statuses_streaming" => Ok(Self::NodeOrderStatuses),
             "node_raw_book_diffs_streaming" => Ok(Self::NodeRawBookDiffs),
             "node_fills_streaming" => Ok(Self::NodeFills),
+            "hip3_oracle_updates_streaming" => Ok(Self::Hip3OracleUpdates),
+            "misc_events_streaming" => Ok(Self::MiscEvents),
             _ => Err(eyre::eyre!("invalid `HyperliquidDirKind`: {s}"))
         }
     }
@@ -84,7 +97,9 @@ impl fmt::Display for HyperliquidDirKind {
         let s = match self {
             HyperliquidDirKind::NodeOrderStatuses => "node_order_statuses_streaming",
             HyperliquidDirKind::NodeRawBookDiffs => "node_raw_book_diffs_streaming",
-            HyperliquidDirKind::NodeFills => "node_fills_streaming"
+            HyperliquidDirKind::NodeFills => "node_fills_streaming",
+            HyperliquidDirKind::Hip3OracleUpdates => "hip3_oracle_updates_streaming",
+            HyperliquidDirKind::MiscEvents => "misc_events_streaming"
         };
 
         fmt::Display::fmt(s, f)

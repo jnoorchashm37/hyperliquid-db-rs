@@ -4,9 +4,14 @@ mod node_order_statuses;
 pub use node_order_statuses::{
     NodeOrderStatusesBuilder, NodeOrderStatusesEvent, NodeOrderStatusesOrder, NodeOrderStatusesRows
 };
+mod hip3_oracle_updates;
+pub use hip3_oracle_updates::Hip3OracleUpdatesRows;
 mod node_raw_book_diffs;
 pub use node_raw_book_diffs::{
     NodeRawBookDiffsEvent, NodeRawBookDiffsRawBookDiff, NodeRawBookDiffsRows
 };
+
+mod misc_events;
+pub use misc_events::MiscEventsRows;
 
 pub const NODE_DATA_DATE_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f";

@@ -5,9 +5,13 @@ use eyre::Context;
 mod node_fills;
 pub use node_fills::NodeFillsParser;
 
+mod hip3_oracle_updates;
+pub use hip3_oracle_updates::Hip3OracleUpdatesParser;
 mod node_order_statuses;
 pub use node_order_statuses::NodeOrderStatusesParser;
 
+mod misc_events;
+pub use misc_events::MiscEventsParser;
 mod node_raw_book_diffs;
 pub use node_raw_book_diffs::NodeRawBookDiffsParser;
 

@@ -56,7 +56,8 @@ impl DirectoryWatcher {
             let result = match self.name {
                 HyperliquidDirKind::NodeFills => self.run_safe::<NodeFillsParser>(),
                 HyperliquidDirKind::NodeOrderStatuses => self.run_safe::<NodeOrderStatusesParser>(),
-                HyperliquidDirKind::NodeRawBookDiffs => self.run_safe::<NodeRawBookDiffsParser>()
+                HyperliquidDirKind::NodeRawBookDiffs => self.run_safe::<NodeRawBookDiffsParser>(),
+                HyperliquidDirKind::Hip3OracleUpdates => self.run_safe::<Hip3OracleUpdatesParser>()
             };
             if let Err(error) = result {
                 tracing::error!("error running filesystem watcher: {error:?}");
